@@ -88,11 +88,7 @@ if not defined VSN_TERMINAL_ID (
 if defined VSN_TERMINAL_SECRET (
     echo   Terminal Secret       :  [provided via environment]
 ) else (
-    powershell -NoProfile -Command ^
-        "$p = Read-Host -Prompt '  ? Terminal Secret' -AsSecureString; ^
-         $b = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($p); ^
-         $t = [Runtime.InteropServices.Marshal]::PtrToStringAuto($b); ^
-         [IO.File]::WriteAllText($env:TEMP + '\vsn_tmp_secret.txt', $t)"
+    powershell -NoProfile -Command "$p = Read-Host -Prompt '  ? Terminal Secret' -AsSecureString; $b = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($p); $t = [Runtime.InteropServices.Marshal]::PtrToStringAuto($b); [IO.File]::WriteAllText($env:TEMP + '\vsn_tmp_secret.txt', $t)"
     set /p "VSN_TERMINAL_SECRET=" < "%TEMP%\vsn_tmp_secret.txt"
     del "%TEMP%\vsn_tmp_secret.txt" 2>nul
 )
