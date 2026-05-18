@@ -66,8 +66,13 @@ echo   ----------------------------------------------------------------
 echo.
 echo   .  Checking for latest release...
 
-:: Use PowerShell to query GitHub API and get the zip download URL
-for /f "usebackq delims=" %%u in (`powershell -NoProfile -Command "(Invoke-RestMethod '%GITHUB_API%').assets | Where-Object { $_.name -like '*.zip' } | Select-Object -First 1 -ExpandProperty browser_download_url"`) do set "DOWNLOAD_URL=%%u"
+:: Use PowerShell to query GitHub API and write the zip URL to a temp file
+powershell -NoProfile -Command "try { $r = Invoke-RestMethod '%GITHUB_API%'; $a = $r.assets | Where-Object { $_.name -like '*.zip' } | Select-Object -First 1; if ($a.browser_download_url) { [System.IO.File]::WriteAllText('%TEMP%\__impactled_url.txt', $a.browser_download_url) } } catch {}"
+set "DOWNLOAD_URL="
+if exist "%TEMP%\__impactled_url.txt" (
+    set /p DOWNLOAD_URL=<"%TEMP%\__impactled_url.txt"
+    del /q "%TEMP%\__impactled_url.txt" 2>nul
+)
 
 if not defined DOWNLOAD_URL (
     echo.
