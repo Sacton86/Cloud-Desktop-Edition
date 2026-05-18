@@ -1,0 +1,18 @@
+# Device-specific config — contains credentials, never commit
+player_config.json
+
+# Downloaded program files
+downloads/
+
+# Screenshots
+screenshot_*.png
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Editor
+.vscode/
+*.swp
+.DS_Store
