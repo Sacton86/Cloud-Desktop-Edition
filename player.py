@@ -26,6 +26,10 @@ from typing import List, Optional, Tuple
 
 import pygame
 
+# In a PyInstaller onefile exe, __file__ resolves to the temp extraction dir.
+# Use sys.executable so paths always anchor to the actual install directory.
+_BASE = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).parent
+
 # ── optional deps ──────────────────────────────────────────────────────────────
 try:
     from PIL import Image, ImageSequence
@@ -62,7 +66,7 @@ except ImportError:
 # Config  (persisted to player_config.json beside the script)
 # ══════════════════════════════════════════════════════════════════════════════
 
-CONFIG_PATH = Path(__file__).parent / 'player_config.json'
+CONFIG_PATH = _BASE / 'player_config.json'
 
 @dataclass
 class Config:
@@ -499,7 +503,7 @@ _preferred_font_file: Optional[str] = None
 
 # Logo cache – keyed by rendered height (int → Surface or None)
 _logo_cache: dict = {}
-_LOGO_PATH = Path(__file__).parent / 'cloudpluslogoinvert.png'
+_LOGO_PATH = _BASE / 'cloudpluslogoinvert.png'
 
 
 def _get_logo(height: int) -> Optional[pygame.Surface]:
@@ -537,7 +541,7 @@ _CJK_FONT_NAMES = [
 _LATIN_FONT_NAMES = ['arial','tahoma','verdana','calibri','segoeui','helvetica']
 
 # Local fonts folder – drop .ttf / .otf files here to make them available.
-_FONT_DIR = Path(__file__).parent / 'fonts'
+_FONT_DIR = _BASE / 'fonts'
 
 
 def _find_best_font_file() -> Optional[str]:
@@ -2704,7 +2708,7 @@ def draw_hud(screen, prog, page_idx, pages, cfg, sx, sy, ox, oy, cms=None):
 
 def _save_screenshot(screen: pygame.Surface):
     ts   = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    path = Path(__file__).parent / f'screenshot_{ts}.png'
+    path = _BASE / f'screenshot_{ts}.png'
     try:
         pygame.image.save(screen, str(path))
         print(f'[Screenshot] Saved: {path.name}')
@@ -2981,7 +2985,7 @@ def run(vsn_path: Optional[str], cfg: Config):
 
     # ── CMS cloud sync ────────────────────────────────────────────────────────
     dl_dir = Path(cfg.cms_dl_dir) if cfg.cms_dl_dir \
-             else Path(__file__).parent / 'downloads'
+             else _BASE / 'downloads'
     dl_dir.mkdir(parents=True, exist_ok=True)
     vsn_q: _queue.Queue = _queue.Queue(maxsize=4)
     cms: Optional[CMSClient] = None
