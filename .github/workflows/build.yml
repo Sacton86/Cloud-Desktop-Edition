@@ -1,0 +1,91 @@
+name: Build and Release
+
+# Triggers when you push a version tag, e.g.:
+#   git tag v1.0.0
+#   git push origin v1.0.0
+#
+# GitHub Actions will then:
+#   1. Build ImpactLED-Cloud-Player.exe with PyInstaller on Windows
+#   2. Bundle the exe + fonts + logo into a zip
+#   3. Publish a GitHub Release with the zip attached
+#
+# Technicians download via full-install.bat which fetches the latest release automatically.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build executable
+        run: pyinstaller player.spec
+
+      - name: Package release zip
+        shell: powershell
+        run: |
+          $tag     = "${{ github.ref_name }}"
+          $zipName = "ImpactLED-Cloud-Player-$tag.zip"
+
+          # Assemble the release folder
+          New-Item -ItemType Directory -Force -Path release
+
+          # Executable
+          Copy-Item "dist\ImpactLED-Cloud-Player.exe" "release\"
+
+          # Fonts directory
+          Copy-Item "fonts" "release\fonts" -Recurse
+
+          # Logo used by the player at runtime
+          if (Test-Path "cloudpluslogoinvert.png") {
+              Copy-Item "cloudpluslogoinvert.png" "release\"
+          }
+
+          # Zip everything
+          Compress-Archive -Path "release\*" -DestinationPath $zipName -Force
+
+          # Pass zip name to later steps
+          "ZIP_NAME=$zipName" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "ImpactLED Cloud+ Desktop Player ${{ github.ref_name }}"
+          body: |
+            ## ImpactLED Cloud+ Desktop Player ${{ github.ref_name }}
+
+            ### Installation (Windows)
+
+            Open an **Admin Command Prompt** and run:
+
+            ```cmd
+            curl -fsSL https://raw.githubusercontent.com/Sacton86/Cloud-Desktop-Edition/main/full-install.bat -o %TEMP%\full-install.bat && %TEMP%\full-install.bat
+            ```
+
+            The installer downloads this release automatically — no manual download needed.
+
+            ### What's included
+            - `ImpactLED-Cloud-Player.exe` — fully self-contained, no Python required
+            - `fonts\` — bundled sign fonts
+          files: ${{ env.ZIP_NAME }}
+          generate_release_notes: false
