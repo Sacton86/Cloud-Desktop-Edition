@@ -199,7 +199,7 @@ echo.
 :: ================================================================
 echo   .  Writing player_config.json...
 
-powershell -NoProfile -Command "$fs = ($env:VSN_FULLSCREEN -eq 'true'); $cfg = [ordered]@{ width = [int]$env:VSN_WIDTH; height = [int]$env:VSN_HEIGHT; fullscreen = $fs; fit_mode = 'native'; fps = 60; bar_color = '0xFF000000'; loop = $true; show_hud = $false; last_dir = ''; brightness = 100; timezone = ''; locale_code = ''; cms_enabled = $true; cms_server = $env:VSN_CMS_SERVER; cms_username = $env:VSN_TERMINAL_ID; cms_password = $env:VSN_TERMINAL_SECRET; cms_interval = 30; cms_dl_dir = '' }; $cfg | ConvertTo-Json | Set-Content $env:CONFIG_PATH -Encoding UTF8"
+powershell -NoProfile -Command "$fs = ($env:VSN_FULLSCREEN -eq 'true'); $cfg = [ordered]@{ width = [int]$env:VSN_WIDTH; height = [int]$env:VSN_HEIGHT; fullscreen = $fs; fit_mode = 'native'; fps = 60; bar_color = '0xFF000000'; loop = $true; show_hud = $false; last_dir = ''; brightness = 100; timezone = ''; locale_code = ''; cms_enabled = $true; cms_server = $env:VSN_CMS_SERVER; cms_username = $env:VSN_TERMINAL_ID; cms_password = $env:VSN_TERMINAL_SECRET; cms_interval = 30; cms_dl_dir = '' }; $json = ConvertTo-Json $cfg; [System.IO.File]::WriteAllText($env:CONFIG_PATH, $json)"
 
 if %errorlevel% neq 0 (
     echo   [ERROR]  Failed to write player_config.json.
