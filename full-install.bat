@@ -60,33 +60,34 @@ echo.
 
 python --version >nul 2>&1
 if %errorlevel% equ 0 (
-    for /f "delims=" %%v in ('python --version 2^>^&1') do echo   [OK]  %%v is already installed.
-) else (
-    echo   .  Python not found -- installing automatically via winget...
-    echo   .  This may take a minute. Please wait.
-    echo.
-    winget install -e --id Python.Python.3.12 ^
-        --accept-source-agreements ^
-        --accept-package-agreements ^
-        --silent
-    if !errorlevel! neq 0 (
-        echo.
-        echo   [ERROR]  Automatic Python install failed.
-        echo           Please install Python manually:
-        echo             1. Go to https://www.python.org/downloads/
-        echo             2. Download and run the installer
-        echo             3. IMPORTANT: tick "Add Python to PATH"
-        echo             4. Re-run this script when done.
-        echo.
-        pause
-        exit /b 1
-    )
-    :: Reload PATH in this session so python is usable immediately
-    for /f "delims=" %%p in ('powershell -NoProfile -Command ^
-        "[Environment]::GetEnvironmentVariable(\"PATH\",\"Machine\") + \";\" + ^
-         [Environment]::GetEnvironmentVariable(\"PATH\",\"User\")"') do set "PATH=%%p"
-    echo   [OK]  Python installed successfully.
+    echo   [OK]  Python is already installed.
+    goto python_ready
 )
+
+echo   .  Python not found -- installing automatically via winget...
+echo   .  This may take a minute. Please wait.
+echo.
+
+winget install -e --id Python.Python.3.12 --accept-source-agreements --accept-package-agreements --silent
+if %errorlevel% neq 0 (
+    echo.
+    echo   [ERROR]  Automatic Python install failed.
+    echo           Please install Python manually:
+    echo             1. Go to https://www.python.org/downloads/
+    echo             2. Download and run the installer
+    echo             3. IMPORTANT: tick "Add Python to PATH"
+    echo             4. Re-run this script when done.
+    echo.
+    pause
+    exit /b 1
+)
+
+:: Reload PATH in this session so python is usable immediately
+for /f "usebackq delims=" %%p in (`powershell -NoProfile -Command "[Environment]::GetEnvironmentVariable('PATH','Machine') + ';' + [Environment]::GetEnvironmentVariable('PATH','User')"`) do set "PATH=%%p"
+
+echo   [OK]  Python installed successfully.
+
+:python_ready
 echo.
 
 :: ================================================================
@@ -124,8 +125,7 @@ echo.
 
 if exist "%TMP_EXTRACT%" rmdir /s /q "%TMP_EXTRACT%"
 
-powershell -NoProfile -Command ^
-    "Expand-Archive -Path '%TMP_ZIP%' -DestinationPath '%TMP_EXTRACT%' -Force"
+powershell -NoProfile -Command "Expand-Archive -Path '%TMP_ZIP%' -DestinationPath '%TMP_EXTRACT%' -Force"
 if %errorlevel% neq 0 (
     echo   [ERROR]  Could not extract the downloaded package.
     pause
