@@ -45,7 +45,7 @@ jobs:
         shell: powershell
         run: |
           $tag     = "${{ github.ref_name }}"
-          $zipName = "ImpactLED-Cloud-Player-$tag.zip"
+          $zipName = "ImpactLED-Cloud-Player.zip"
 
           # Assemble the release folder
           New-Item -ItemType Directory -Force -Path release

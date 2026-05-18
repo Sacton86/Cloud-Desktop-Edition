@@ -56,7 +56,7 @@ set "TMP_EXTRACT=%TEMP%\impactled-release-extract"
 set "CONFIG_PATH=%INSTALL_DIR%\player_config.json"
 set "LAUNCHER=%INSTALL_DIR%\run_player.bat"
 set "TASK_NAME=ImpactLED Cloud+ Desktop Player"
-set "GITHUB_API=https://api.github.com/repos/Sacton86/Cloud-Desktop-Edition/releases/latest"
+set "DOWNLOAD_URL=https://github.com/Sacton86/Cloud-Desktop-Edition/releases/latest/download/ImpactLED-Cloud-Player.zip"
 
 :: ================================================================
 ::  [1/4]  Download latest release from GitHub
@@ -64,35 +64,6 @@ set "GITHUB_API=https://api.github.com/repos/Sacton86/Cloud-Desktop-Edition/rele
 echo   [*]  [1/4]  Downloading Latest Release from GitHub...
 echo   ----------------------------------------------------------------
 echo.
-echo   .  Checking for latest release...
-
-:: Download GitHub API response to a temp file (curl avoids PowerShell pipe issues)
-curl -sf "%GITHUB_API%" -o "%TEMP%\__impactled_api.json" 2>nul
-
-:: Parse JSON with PowerShell - no pipe operators used
-powershell -NoProfile -Command "try { $j = ConvertFrom-Json (Get-Content '%TEMP%\__impactled_api.json' -Raw); foreach ($a in $j.assets) { if ($a.name -like '*.zip') { [System.IO.File]::WriteAllText('%TEMP%\__impactled_url.txt', $a.browser_download_url); break } } } catch {}"
-del /q "%TEMP%\__impactled_api.json" 2>nul
-
-set "DOWNLOAD_URL="
-if exist "%TEMP%\__impactled_url.txt" (
-    set /p DOWNLOAD_URL=<"%TEMP%\__impactled_url.txt"
-    del /q "%TEMP%\__impactled_url.txt" 2>nul
-)
-
-if not defined DOWNLOAD_URL (
-    echo.
-    echo   [ERROR]  Could not find a release to download.
-    echo.
-    echo           This usually means no release has been published yet.
-    echo           A release is created automatically when a version tag
-    echo           is pushed to GitHub (e.g. git tag v1.0.0 and git push --tags).
-    echo.
-    echo           Contact Impact LED Signs support if this persists.
-    pause
-    exit /b 1
-)
-
-echo   .  Found release :  %DOWNLOAD_URL%
 echo   .  Downloading... please wait.
 echo.
 
