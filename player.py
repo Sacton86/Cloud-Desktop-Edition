@@ -854,7 +854,8 @@ class CMSClient:
         self.dl_dir       = dl_dir
         self.vsn_q        = vsn_q
         self._stop        = threading.Event()
-        self._seen: dict  = {}
+        self._seen_path   = dl_dir / '.cms_seen.json'
+        self._seen: dict  = self._load_seen()
         self.status       = 'starting…'
         self.last_err     = ''
         self._current_vsn = ''        # name of currently playing program
@@ -1552,7 +1553,7 @@ class CMSClient:
                 for k in stale_keys:
                     del self._seen[k]
                 print(f'[Cloud+] ↓ {name}')
-                self._dl(url, dest, size)
+                self._dl(url, dest, size, force=url_changed)
                 vsn_fetched = True
 
             # Mark changed if content changed, force-push (re-evaluate active program),
@@ -1565,6 +1566,7 @@ class CMSClient:
                     vsn_fetched = True
 
             self._seen[key] = (url, size)
+            self._save_seen()
             vsn_path = dest
 
         if vsn_path is None:
@@ -1621,6 +1623,24 @@ class CMSClient:
                 print(f'[Cloud+] media {cms_name}: {exc}')
 
         return (vsn_path, vsn_fetched) if changed else None
+
+    def _load_seen(self) -> dict:
+        try:
+            if self._seen_path.exists():
+                import json as _json
+                return _json.loads(self._seen_path.read_text(encoding='utf-8'))
+        except Exception:
+            pass
+        return {}
+
+    def _save_seen(self):
+        try:
+            import json as _json
+            self._seen_path.write_text(
+                _json.dumps(self._seen, ensure_ascii=False, indent=None),
+                encoding='utf-8')
+        except Exception:
+            pass
 
     def _dl(self, url: str, dest: Path, expected: int = 0, force: bool = False):
         existing = dest.stat().st_size if dest.exists() else 0
