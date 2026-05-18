@@ -9,9 +9,9 @@ A software LED sign player for the **Impact Cloud+** platform. Runs on a standar
 | Item | Details |
 |------|---------|
 | OS | Windows 10 / 11 (64-bit) |
-| Python | 3.10+ (must be installed and on PATH) |
-| Autostart | Windows Task Scheduler (runs at logon, restarts on crash) |
-| Updates | `updater.sh` (manual, curl-based — built-in auto-update coming soon) |
+| Python | Not required — installer deploys a self-contained exe |
+| Autostart | Windows Task Scheduler (player launches at logon, updater runs at startup) |
+| Updates | Automatic — `updater.bat` checks for a new GitHub release 5 minutes after every boot |
 
 > **Linux / macOS** — `player.py` runs directly with Python for development and testing. `install.sh` targets Debian/Ubuntu systems.
 
@@ -19,22 +19,23 @@ A software LED sign player for the **Impact Cloud+** platform. Runs on a standar
 
 ## Installation — Windows (one-liner)
 
-Open **PowerShell as Administrator** and run:
-
-```powershell
-irm https://raw.githubusercontent.com/Sacton86/Cloud-Desktop-Edition/main/install.bat -OutFile "$env:TEMP\install.bat"; Start-Process "$env:TEMP\install.bat" -Verb RunAs
-```
-
-Or with **curl** (Windows 11 built-in):
+Open **Command Prompt as Administrator** and run:
 
 ```cmd
-curl -fsSL https://raw.githubusercontent.com/Sacton86/Cloud-Desktop-Edition/main/install.bat -o %TEMP%\install.bat && %TEMP%\install.bat
+curl -fsSL https://raw.githubusercontent.com/Sacton86/Cloud-Desktop-Edition/main/full-install.bat -o %TEMP%\full-install.bat && %TEMP%\full-install.bat
 ```
 
+Or with **PowerShell as Administrator**:
+
+```powershell
+curl -fsSL https://raw.githubusercontent.com/Sacton86/Cloud-Desktop-Edition/main/full-install.bat -o "$env:TEMP\full-install.bat"; & "$env:TEMP\full-install.bat"
+```
+
+> `full-install.bat` requires no Python or software pre-installed. It downloads the latest release from GitHub, installs to `C:\ImpactLED\CloudPlayer\`, configures the device, and registers autostart.
 
 The installer will prompt for:
 - **Terminal ID** — your Cloud+ terminal identifier
-- **Terminal Secret** — your Cloud+ terminal secret (input is hidden)
+- **Terminal Secret** — your Cloud+ terminal secret
 - **Cloud+ server URL** — defaults to `https://access.impactledsigns.com/`
 - **Display resolution** and fullscreen preference
 
@@ -47,7 +48,7 @@ set VSN_CMS_SERVER=https://access.impactledsigns.com/
 set VSN_WIDTH=1920
 set VSN_HEIGHT=1080
 set VSN_FULLSCREEN=true
-install.bat
+%TEMP%\full-install.bat
 ```
 
 ---
@@ -62,15 +63,31 @@ curl -fsSL https://raw.githubusercontent.com/Sacton86/Cloud-Desktop-Edition/main
 
 ## Updating
 
-Run the updater manually (Linux/dev):
+**Windows** — updates are automatic. `updater.bat` is registered as a Task Scheduler job that runs 5 minutes after every boot. It compares the installed version against the latest GitHub release and updates silently if a new version is available. Player credentials are never overwritten.
+
+To force an immediate update check:
+```cmd
+C:\ImpactLED\CloudPlayer\updater.bat
+```
+
+**Linux / dev** — run the updater manually:
 
 ```bash
 sudo bash updater.sh
 ```
 
-The updater fetches the latest GitHub release, replaces changed files, and restarts the service. It never overwrites `player_config.json` or the `downloads/` folder.
+---
 
-> Built-in automatic update check at startup (Windows) is on the roadmap.
+## Releasing a New Version (maintainers)
+
+Commit your changes, then push a version tag:
+
+```cmd
+git tag v1.0.5
+git push origin v1.0.5
+```
+
+GitHub Actions will automatically build the exe with PyInstaller, bundle it into `ImpactLED-Cloud-Player.zip`, and publish a GitHub Release. Running players will pick up the update on their next reboot.
 
 ---
 
@@ -101,7 +118,7 @@ Make sure a display is available and `player_config.json` exists in the same dir
 
 ## Configuration Reference (`player_config.json`)
 
-Written by the installer and lives next to `player.py`. It is **device-specific** and excluded from version control. Use `player_config.example.json` as a reference template.
+Written by the installer and lives in `C:\ImpactLED\CloudPlayer\`. It is **device-specific** and excluded from version control. Use `player_config.example.json` as a reference template.
 
 | Field | Description |
 |-------|-------------|
@@ -129,15 +146,20 @@ Written by the installer and lives next to `player.py`. It is **device-specific*
 ## File Layout
 
 ```
-cloud-player/
+Cloud-Desktop-Edition/
 ├── player.py                  # Main application source
-├── install.bat                # Windows installer
+├── player.spec                # PyInstaller build spec
+├── full-install.bat           # Windows full device installer (no Python required)
+├── install.bat                # Windows installer (requires Python 3.12 pre-installed)
 ├── install.sh                 # Linux installer (Debian/Ubuntu)
-├── updater.sh                 # Linux/dev updater (curl-based, no git)
+├── updater.bat                # Windows auto-updater (runs at startup via Task Scheduler)
+├── updater.sh                 # Linux/dev updater
 ├── player_config.json         # Device config — generated by installer, git-ignored
 ├── player_config.example.json # Template for reference
 ├── requirements.txt           # Python dependencies
 ├── vsn_player.service         # systemd unit — Linux reference
+├── .github/workflows/
+│   └── build.yml              # GitHub Actions — builds exe and publishes release on tag push
 ├── downloads/                 # Cloud+-downloaded programs (git-ignored)
 └── fonts/                     # Bundled fonts
 ```
@@ -154,7 +176,8 @@ cloud-player/
 | Themed installer (`install.bat` — Windows) | Done |
 | Themed installer (`install.sh` — Linux/dev) | Done |
 | curl-based updater (`updater.sh` — Linux/dev) | Done |
-| Built-in startup update check (Windows) | Next |
-| PyInstaller standalone exe build | Next |
-| GitHub Actions auto-build workflow | Next |
-| Bulk deployment (300-device env-var mode) | Next |
+| Full device installer (`full-install.bat` — no Python required) | Done |
+| PyInstaller standalone exe build | Done |
+| GitHub Actions auto-build + release workflow | Done |
+| Built-in startup auto-update check (Windows) | Done |
+| Bulk deployment (env-var non-interactive mode) | Done |
