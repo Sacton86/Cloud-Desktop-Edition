@@ -40,22 +40,23 @@ echo   Running as user   :  %USERNAME%
 echo   ----------------------------------------------------------------
 echo.
 
-:: --- Python check ------------------------------------------------
-python --version >nul 2>&1
+:: --- Python 3.12 check -------------------------------------------
+py -3.12 --version >nul 2>&1
 if %errorlevel% neq 0 (
-    echo   [ERROR]  Python not found.
-    echo            Install Python 3.10+ from https://www.python.org/downloads/
-    echo            Tick "Add Python to PATH" during installation.
+    echo   [ERROR]  Python 3.12 not found.
+    echo            The full-install.bat script installs it automatically.
+    echo            Or install manually from https://www.python.org/downloads/releases/
+    echo            and re-run this installer.
     echo.
     pause
     exit /b 1
 )
-for /f "delims=" %%v in ('python --version 2^>^&1') do set "PY_VER=%%v"
+for /f "delims=" %%v in ('py -3.12 --version 2^>^&1') do set "PY_VER=%%v"
 echo   [OK]  Found %PY_VER%
 
-pip --version >nul 2>&1
+py -3.12 -m pip --version >nul 2>&1
 if %errorlevel% neq 0 (
-    echo   [ERROR]  pip not found.  Run:  python -m ensurepip --upgrade
+    echo   [ERROR]  pip not found.  Run:  py -3.12 -m ensurepip --upgrade
     pause
     exit /b 1
 )
@@ -154,7 +155,7 @@ echo   [*]  [1/4]  Python Requirements
 echo   ----------------------------------------------------------------
 echo.
 echo   .  Installing packages from requirements.txt...
-pip install -r "%INSTALL_DIR%\requirements.txt"
+py -3.12 -m pip install -r "%INSTALL_DIR%\requirements.txt"
 if %errorlevel% neq 0 (
     echo.
     echo   [ERROR]  pip install failed -- see output above.
@@ -222,7 +223,7 @@ echo.
     echo title ImpactLED Cloud+ Desktop Player
     echo :loop
     echo cd /d "%INSTALL_DIR%"
-    echo python player.py
+    echo py -3.12 player.py
     echo echo.
     echo echo   [ImpactLED Cloud+ Desktop Player exited -- restarting in 5 seconds...]
     echo timeout /t 5 /nobreak ^>nul

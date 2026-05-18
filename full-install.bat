@@ -58,23 +58,24 @@ echo   [*]  [1/4]  Checking for Python...
 echo   ----------------------------------------------------------------
 echo.
 
-python --version >nul 2>&1
+py -3.12 --version >nul 2>&1
 if %errorlevel% equ 0 (
-    echo   [OK]  Python is already installed.
+    echo   [OK]  Python 3.12 is already installed.
     goto python_ready
 )
 
-echo   .  Python not found -- installing automatically via winget...
+echo   .  Python 3.12 not found -- installing automatically via winget...
 echo   .  This may take a minute. Please wait.
+echo   .  (Other Python versions on this machine will not be affected.)
 echo.
 
 winget install -e --id Python.Python.3.12 --accept-source-agreements --accept-package-agreements --silent
 if %errorlevel% neq 0 (
     echo.
-    echo   [ERROR]  Automatic Python install failed.
-    echo           Please install Python manually:
-    echo             1. Go to https://www.python.org/downloads/
-    echo             2. Download and run the installer
+    echo   [ERROR]  Automatic Python 3.12 install failed.
+    echo           Please install it manually:
+    echo             1. Go to https://www.python.org/downloads/releases/
+    echo             2. Download Python 3.12 and run the installer
     echo             3. IMPORTANT: tick "Add Python to PATH"
     echo             4. Re-run this script when done.
     echo.
@@ -82,10 +83,10 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-:: Reload PATH in this session so python is usable immediately
+:: Reload PATH in this session so py launcher sees Python 3.12
 for /f "usebackq delims=" %%p in (`powershell -NoProfile -Command "[Environment]::GetEnvironmentVariable('PATH','Machine') + ';' + [Environment]::GetEnvironmentVariable('PATH','User')"`) do set "PATH=%%p"
 
-echo   [OK]  Python installed successfully.
+echo   [OK]  Python 3.12 installed successfully.
 
 :python_ready
 echo.
