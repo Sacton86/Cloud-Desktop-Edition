@@ -61,6 +61,12 @@ jobs:
               Copy-Item "cloudpluslogoinvert.png" "release\"
           }
 
+          # Updater script
+          Copy-Item "updater.bat" "release\"
+
+          # Version file so the updater can detect installed version
+          [System.IO.File]::WriteAllText("release\version.txt", $tag)
+
           # Zip everything
           Compress-Archive -Path "release\*" -DestinationPath $zipName -Force
 

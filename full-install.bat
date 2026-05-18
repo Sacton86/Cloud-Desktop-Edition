@@ -250,6 +250,22 @@ if %errorlevel% neq 0 (
 )
 echo.
 
+:: Register auto-updater task (runs as SYSTEM, 5 min after each boot)
+set "UPDATER_TASK=ImpactLED Cloud+ Updater"
+schtasks /delete /tn "%UPDATER_TASK%" /f >nul 2>&1
+schtasks /create /tn "%UPDATER_TASK%" ^
+    /tr "cmd /c \"%INSTALL_DIR%\updater.bat\"" ^
+    /sc ONSTART ^
+    /delay 0005:00 ^
+    /ru SYSTEM ^
+    /f
+if %errorlevel% neq 0 (
+    echo   [WARN]  Could not register updater task.
+) else (
+    echo   [OK]  Auto-updater registered -- checks for updates 5 min after each boot.
+)
+echo.
+
 :: ================================================================
 ::  Launch player now
 :: ================================================================
