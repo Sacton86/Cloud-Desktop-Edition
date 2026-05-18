@@ -22,16 +22,15 @@ A software LED sign player for the **Impact Cloud+** platform. Runs on a standar
 Open **PowerShell as Administrator** and run:
 
 ```powershell
-irm https://raw.githubusercontent.com/OWNER/REPO/main/install.bat -OutFile "$env:TEMP\install.bat"; Start-Process "$env:TEMP\install.bat" -Verb RunAs
+irm https://raw.githubusercontent.com/Sacton86/Cloud-Desktop-Edition/main/install.bat -OutFile "$env:TEMP\install.bat"; Start-Process "$env:TEMP\install.bat" -Verb RunAs
 ```
 
 Or with **curl** (Windows 11 built-in):
 
 ```cmd
-curl -fsSL https://raw.githubusercontent.com/OWNER/REPO/main/install.bat -o %TEMP%\install.bat && %TEMP%\install.bat
+curl -fsSL https://raw.githubusercontent.com/Sacton86/Cloud-Desktop-Edition/main/install.bat -o %TEMP%\install.bat && %TEMP%\install.bat
 ```
 
-> Replace `OWNER/REPO` with the actual GitHub repository path once uploaded.
 
 The installer will prompt for:
 - **Terminal ID** — your Cloud+ terminal identifier
@@ -56,7 +55,7 @@ install.bat
 ## Installation — Linux (one-liner)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/OWNER/REPO/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/Sacton86/Cloud-Desktop-Edition/main/install.sh | sudo bash
 ```
 
 ---

@@ -10,7 +10,7 @@
 set -euo pipefail
 
 # ── Configuration ────────────────────────────────────────────────
-GITHUB_REPO="${GITHUB_REPO:-OWNER/REPO}"   # ← replace with your GitHub owner/repo (e.g. impactledsigns/cloud-player)
+GITHUB_REPO="${GITHUB_REPO:-Sacton86/Cloud-Desktop-Edition}"
 INSTALL_DIR="${INSTALL_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 SERVICE_NAME="vsn_player"
 
