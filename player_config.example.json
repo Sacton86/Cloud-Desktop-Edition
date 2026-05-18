@@ -1,0 +1,21 @@
+{
+  "width": 1920,
+  "height": 1080,
+  "fullscreen": false,
+  "fit_mode": "native",
+  "fps": 60,
+  "bar_color": "0xFF000000",
+  "loop": true,
+  "show_hud": false,
+  "last_dir": "",
+  "brightness": 100,
+  "timezone": "",
+  "locale_code": "",
+  "cms_enabled": true,
+  "cms_server": "https://access.impactledsigns.com/",
+  "cms_username": "YOUR_CMS_USERNAME",
+  "cms_password": "YOUR_CMS_PASSWORD",
+  "cms_interval": 30,
+  "cms_dl_dir": "",
+  "device_sn": "YOUR_DEVICE_SERIAL_NUMBER"
+}

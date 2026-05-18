@@ -1,0 +1,19 @@
+[Unit]
+Description=VSN LED Sign Player
+After=graphical-session.target
+Wants=graphical-session.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/vsn_player
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=%h/.Xauthority
+ExecStart=/usr/bin/python3 %h/vsn_player/player.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=vsn_player
+
+[Install]
+WantedBy=graphical-session.target

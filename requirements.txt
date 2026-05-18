@@ -1,0 +1,5 @@
+pygame>=2.0.0
+requests>=2.25.0
+websocket-client>=1.0.0
+Pillow>=8.0.0
+opencv-python>=4.5.0
