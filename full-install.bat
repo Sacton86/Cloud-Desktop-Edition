@@ -206,11 +206,11 @@ if %errorlevel% neq 0 (
     pause
     exit /b 1
 )
-echo   [OK]  Config written  ->  %CONFIG_PATH%
+echo   [OK]  Config written  -^>  %CONFIG_PATH%
 
 :: Create downloads folder
 if not exist "%INSTALL_DIR%\downloads" mkdir "%INSTALL_DIR%\downloads"
-echo   [OK]  Downloads dir  ->  %INSTALL_DIR%\downloads
+echo   [OK]  Downloads dir  -^>  %INSTALL_DIR%\downloads
 echo.
 
 :: ================================================================
@@ -232,7 +232,7 @@ echo.
     echo timeout /t 5 /nobreak ^>nul
     echo goto loop
 ) > "%LAUNCHER%"
-echo   [OK]  Launcher written  ->  %LAUNCHER%
+echo   [OK]  Launcher written  -^>  %LAUNCHER%
 
 :: Register with Task Scheduler
 schtasks /delete /tn "%TASK_NAME%" /f >nul 2>&1
