@@ -26,10 +26,6 @@ from typing import List, Optional, Tuple
 
 import pygame
 
-# In a PyInstaller onefile exe, __file__ resolves to the temp extraction dir.
-# Use sys.executable so paths always anchor to the actual install directory.
-_BASE = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).parent
-
 # ── optional deps ──────────────────────────────────────────────────────────────
 try:
     from PIL import Image, ImageSequence
@@ -66,7 +62,7 @@ except ImportError:
 # Config  (persisted to player_config.json beside the script)
 # ══════════════════════════════════════════════════════════════════════════════
 
-CONFIG_PATH = _BASE / 'player_config.json'
+CONFIG_PATH = Path(__file__).parent / 'player_config.json'
 
 @dataclass
 class Config:
@@ -503,7 +499,7 @@ _preferred_font_file: Optional[str] = None
 
 # Logo cache – keyed by rendered height (int → Surface or None)
 _logo_cache: dict = {}
-_LOGO_PATH = _BASE / 'cloudpluslogoinvert.png'
+_LOGO_PATH = Path(__file__).parent / 'cloudpluslogoinvert.png'
 
 
 def _get_logo(height: int) -> Optional[pygame.Surface]:
@@ -541,7 +537,7 @@ _CJK_FONT_NAMES = [
 _LATIN_FONT_NAMES = ['arial','tahoma','verdana','calibri','segoeui','helvetica']
 
 # Local fonts folder – drop .ttf / .otf files here to make them available.
-_FONT_DIR = _BASE / 'fonts'
+_FONT_DIR = Path(__file__).parent / 'fonts'
 
 
 def _find_best_font_file() -> Optional[str]:
@@ -854,8 +850,7 @@ class CMSClient:
         self.dl_dir       = dl_dir
         self.vsn_q        = vsn_q
         self._stop        = threading.Event()
-        self._seen_path   = dl_dir / '.cms_seen.json'
-        self._seen: dict  = self._load_seen()
+        self._seen: dict  = {}
         self.status       = 'starting…'
         self.last_err     = ''
         self._current_vsn = ''        # name of currently playing program
@@ -1553,7 +1548,7 @@ class CMSClient:
                 for k in stale_keys:
                     del self._seen[k]
                 print(f'[Cloud+] ↓ {name}')
-                self._dl(url, dest, size, force=url_changed)
+                self._dl(url, dest, size)
                 vsn_fetched = True
 
             # Mark changed if content changed, force-push (re-evaluate active program),
@@ -1566,7 +1561,6 @@ class CMSClient:
                     vsn_fetched = True
 
             self._seen[key] = (url, size)
-            self._save_seen()
             vsn_path = dest
 
         if vsn_path is None:
@@ -1623,24 +1617,6 @@ class CMSClient:
                 print(f'[Cloud+] media {cms_name}: {exc}')
 
         return (vsn_path, vsn_fetched) if changed else None
-
-    def _load_seen(self) -> dict:
-        try:
-            if self._seen_path.exists():
-                import json as _json
-                return _json.loads(self._seen_path.read_text(encoding='utf-8'))
-        except Exception:
-            pass
-        return {}
-
-    def _save_seen(self):
-        try:
-            import json as _json
-            self._seen_path.write_text(
-                _json.dumps(self._seen, ensure_ascii=False, indent=None),
-                encoding='utf-8')
-        except Exception:
-            pass
 
     def _dl(self, url: str, dest: Path, expected: int = 0, force: bool = False):
         existing = dest.stat().st_size if dest.exists() else 0
@@ -2606,11 +2582,26 @@ class SettingsOverlay:
 
     def draw(self, screen: pygame.Surface):
         sw, sh = screen.get_size()
-        n_rows = len(self.DEFS)
-        panel_h = self.TITLE + n_rows * self.ROW_H + self.PAD * 2
+        n_rows  = len(self.DEFS)
 
-        px = (sw - self.W) // 2
-        py = (sh - panel_h) // 2
+        # Fit panel width to screen
+        panel_w = min(self.W, sw - self.PAD * 2)
+
+        # Scale row/title heights so panel fits vertically on small screens
+        full_h  = self.TITLE + n_rows * self.ROW_H + self.PAD * 2
+        avail_h = sh - self.PAD * 2
+        if full_h <= avail_h:
+            scale   = 1.0
+            row_h   = self.ROW_H
+            title_h = self.TITLE
+        else:
+            scale   = avail_h / full_h
+            row_h   = max(16, int(self.ROW_H * scale))
+            title_h = max(20, int(self.TITLE * scale))
+
+        panel_h = title_h + n_rows * row_h + self.PAD * 2
+        px = (sw - panel_w) // 2
+        py = max(0, (sh - panel_h) // 2)
 
         # Dim background
         dim = pygame.Surface((sw, sh), pygame.SRCALPHA)
@@ -2618,35 +2609,35 @@ class SettingsOverlay:
         screen.blit(dim, (0, 0))
 
         # Panel background
-        pygame.draw.rect(screen, (30, 30, 40), (px, py, self.W, panel_h))
-        pygame.draw.rect(screen, (80, 130, 200), (px, py, self.W, panel_h), 2)
+        pygame.draw.rect(screen, (30, 30, 40), (px, py, panel_w, panel_h))
+        pygame.draw.rect(screen, (80, 130, 200), (px, py, panel_w, panel_h), 2)
 
         # Title
-        tf = ui_font(22)
+        tf = ui_font(max(13, int(22 * scale)))
         ts = tf.render('⚙  PLAYER SETTINGS  (F12 to close)', True, (180, 210, 255))
-        screen.blit(ts, (px + self.PAD, py + (self.TITLE - ts.get_height()) // 2))
+        screen.blit(ts, (px + self.PAD, py + (title_h - ts.get_height()) // 2))
 
         pygame.draw.line(screen, (80,130,200),
-                         (px, py + self.TITLE), (px + self.W, py + self.TITLE), 1)
+                         (px, py + title_h), (px + panel_w, py + title_h), 1)
 
-        rf  = ui_font(18)
-        vf  = ui_font(18)
+        rf  = ui_font(max(11, int(18 * scale)))
+        vf  = ui_font(max(11, int(18 * scale)))
         sel_row_i = self._selectable[self.sel] if self._selectable else -1
 
         for row_i, (label, attr, kind, extra) in enumerate(self.DEFS):
-            ry     = py + self.TITLE + self.PAD + row_i * self.ROW_H
+            ry     = py + title_h + self.PAD + row_i * row_h
             is_sel = (row_i == sel_row_i)
 
             if kind == 'sep':
                 pygame.draw.line(screen, (60,70,90),
-                                 (px+self.PAD, ry+self.ROW_H//2),
-                                 (px+self.W-self.PAD, ry+self.ROW_H//2), 1)
+                                 (px+self.PAD, ry+row_h//2),
+                                 (px+panel_w-self.PAD, ry+row_h//2), 1)
                 continue
 
             # Highlight selected row
             if is_sel:
                 pygame.draw.rect(screen, (50, 80, 130),
-                                 (px+2, ry, self.W-4, self.ROW_H-2))
+                                 (px+2, ry, panel_w-4, row_h-2))
 
             label_clr = (220,220,220) if kind != 'action' else (100,200,120)
             if kind == 'action':
@@ -2657,7 +2648,7 @@ class SettingsOverlay:
                     label_clr = (120, 180, 255)
 
             ls = rf.render(label, True, label_clr)
-            screen.blit(ls, (px + self.PAD, ry + (self.ROW_H - ls.get_height()) // 2))
+            screen.blit(ls, (px + self.PAD, ry + (row_h - ls.get_height()) // 2))
 
             if attr is not None:
                 cur = getattr(self.cfg, attr)
@@ -2688,12 +2679,13 @@ class SettingsOverlay:
                     val_clr = (120,200,255)
 
                 vs = vf.render(val_str, True, val_clr)
-                screen.blit(vs, (px + self.W - vs.get_width() - self.PAD,
-                                 ry + (self.ROW_H - vs.get_height()) // 2))
+                screen.blit(vs, (px + panel_w - vs.get_width() - self.PAD,
+                                 ry + (row_h - vs.get_height()) // 2))
 
-        hint = ui_font(14).render(
-            'UP/DOWN select  ·  LEFT/RIGHT change  ·  ENTER edit  ·  Ctrl+V paste  ·  ESC discard',
-            True, (100,100,130))
+        hint_txt = ('↑↓ select  ·  ←→ change  ·  Enter edit  ·  Esc discard'
+                    if scale < 0.85 else
+                    'UP/DOWN select  ·  LEFT/RIGHT change  ·  ENTER edit  ·  Ctrl+V paste  ·  ESC discard')
+        hint = ui_font(max(9, int(14 * scale))).render(hint_txt, True, (100,100,130))
         screen.blit(hint, (px + self.PAD, py + panel_h - hint.get_height() - 6))
 
 
@@ -2728,7 +2720,7 @@ def draw_hud(screen, prog, page_idx, pages, cfg, sx, sy, ox, oy, cms=None):
 
 def _save_screenshot(screen: pygame.Surface):
     ts   = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    path = _BASE / f'screenshot_{ts}.png'
+    path = Path(__file__).parent / f'screenshot_{ts}.png'
     try:
         pygame.image.save(screen, str(path))
         print(f'[Screenshot] Saved: {path.name}')
@@ -3005,7 +2997,7 @@ def run(vsn_path: Optional[str], cfg: Config):
 
     # ── CMS cloud sync ────────────────────────────────────────────────────────
     dl_dir = Path(cfg.cms_dl_dir) if cfg.cms_dl_dir \
-             else _BASE / 'downloads'
+             else Path(__file__).parent / 'downloads'
     dl_dir.mkdir(parents=True, exist_ok=True)
     vsn_q: _queue.Queue = _queue.Queue(maxsize=4)
     cms: Optional[CMSClient] = None

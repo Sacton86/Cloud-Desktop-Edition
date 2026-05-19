@@ -236,8 +236,8 @@ mkdir -p "$INSTALL_DIR/downloads"
 chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR/downloads"
 ok "Downloads dir   →  ${INSTALL_DIR}/downloads"
 
-# ── [4/5] Autostart setup ────────────────────────────────────────
-section "[4/5]  Autostart"
+# ── [4/6] Autostart setup ────────────────────────────────────────
+section "[4/6]  Autostart"
 
 # -- Systemd user service (handles crash-restart and manual control) --
 SYSTEMD_USER_DIR="$SERVICE_HOME/.config/systemd/user"
@@ -305,8 +305,8 @@ fi
 loginctl enable-linger "$SERVICE_USER"
 ok "Linger enabled for '${SERVICE_USER}'  (autostart on boot)"
 
-# ── [5/5] Enable & start ─────────────────────────────────────────
-section "[5/5]  Starting Service"
+# ── [5/6] Enable & start ─────────────────────────────────────────
+section "[5/6]  Starting Service"
 XDG_RUNTIME_DIR="/run/user/$(id -u "$SERVICE_USER")"
 export XDG_RUNTIME_DIR
 
@@ -322,6 +322,43 @@ run_as_user enable vsn_player
 run_as_user start vsn_player \
     && ok "Service started." \
     || warn "Service start deferred — no display during install. Player will start automatically on next login/reboot."
+
+# ── [6/6] Auto-updater (daily systemd timer) ─────────────────────
+section "[6/6]  Auto-updater"
+
+cat > /etc/systemd/system/vsn_updater.service << UPDEOF
+[Unit]
+Description=VSN Cloud Player Auto-updater
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=SUDO_USER=${SERVICE_USER}
+Environment=INSTALL_DIR=${INSTALL_DIR}
+ExecStart=/bin/bash ${INSTALL_DIR}/updater.sh
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=vsn_updater
+UPDEOF
+
+cat > /etc/systemd/system/vsn_updater.timer << TMREOF
+[Unit]
+Description=VSN Cloud Player daily update check
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+RandomizedDelaySec=600
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+TMREOF
+
+systemctl daemon-reload
+systemctl enable vsn_updater.timer
+systemctl start vsn_updater.timer
+ok "Auto-updater      →  daily at 03:00  (± 10 min)"
 
 # ── Summary ──────────────────────────────────────────────────────
 echo
@@ -340,9 +377,12 @@ echo -e "    ${CY}journalctl --user -u vsn_player -f${RESET}    ${DIM}# live log
 echo -e "    ${CY}systemctl --user status vsn_player${RESET}    ${DIM}# service status${RESET}"
 echo -e "    ${CY}systemctl --user restart vsn_player${RESET}   ${DIM}# restart player${RESET}"
 echo -e "    ${CY}systemctl --user stop vsn_player${RESET}      ${DIM}# stop player${RESET}"
+echo -e "    ${CY}systemctl status vsn_updater.timer${RESET}    ${DIM}# updater schedule${RESET}"
+echo -e "    ${CY}sudo bash ${INSTALL_DIR}/updater.sh${RESET}   ${DIM}# manual update${RESET}"
 echo
-echo -e "  ${DIM}Note: Player will start automatically on next login/reboot.${RESET}"
-echo -e "  ${DIM}      Screen blanking has been disabled in ~/.xprofile.${RESET}"
+echo -e "  ${DIM}Note: Player starts automatically on login/reboot.${RESET}"
+echo -e "  ${DIM}      Updates check daily at 03:00 via systemd timer.${RESET}"
+echo -e "  ${DIM}      Screen blanking disabled in ~/.xprofile.${RESET}"
 echo
 echo -e "${DIM}${CY}  ══════════════════════════════════════════════════════════════${RESET}"
 echo -e "${DIM}              Impact LED Signs  ·  impactledsigns.com${RESET}"
