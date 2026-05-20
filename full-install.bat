@@ -103,6 +103,12 @@ if %errorlevel% neq 0 (
 del /q "%TMP_ZIP%" 2>nul
 rmdir /s /q "%TMP_EXTRACT%" 2>nul
 
+:: Record installed version from GitHub API
+set "GITHUB_API=https://api.github.com/repos/Sacton86/Cloud-Desktop-Edition/releases/latest"
+curl -sf "%GITHUB_API%" -o "%TEMP%\__impactled_rel.json" 2>nul
+powershell -NoProfile -Command "try { $j = ConvertFrom-Json (Get-Content '%TEMP%\__impactled_rel.json' -Raw); [System.IO.File]::WriteAllText('%INSTALL_DIR%\version.txt', $j.tag_name) } catch {}"
+del /q "%TEMP%\__impactled_rel.json" 2>nul
+
 if not exist "%INSTALL_DIR%\ImpactLED-Cloud-Player.exe" (
     echo   [ERROR]  ImpactLED-Cloud-Player.exe not found after extraction.
     echo           The release package may be corrupt. Please try again.

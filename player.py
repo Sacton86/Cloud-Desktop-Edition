@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-VERSION = "1.0.5"
+VERSION = "1.0.7"
 
 def _runtime_version() -> str:
     """Return the installed release tag from version.txt if present, else VERSION."""
@@ -2923,7 +2923,7 @@ def draw_welcome(screen: pygame.Surface, cfg: Config,
         screen.blit(ds, (hx, hy))
         hx += ds.get_width() + 20
 
-    vs = hf.render(_runtime_version(), True, (70, 75, 95))
+    vs = hf.render(_runtime_version(), True, (140, 145, 165))
     screen.blit(vs, (sw - vs.get_width() - 12, hy))
 
 
