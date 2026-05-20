@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-VERSION = "1.0.9"
+VERSION = "1.0.10"
 
 def _runtime_version() -> str:
     """Return the installed release tag from version.txt if present, else VERSION."""
@@ -14,6 +14,7 @@ def _runtime_version() -> str:
     except OSError:
         pass
     return VERSION
+
 """
 Impact Cloud+ Desktop Player  –  Windows 10 / Linux desktop
 Plays .vsn program files for LED sign displays.
@@ -37,6 +38,14 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
 from typing import List, Optional, Tuple
+
+# When running as a PyInstaller onefile exe, __file__ resolves to the temp
+# extraction directory (_MEI*), not the install directory.  Every runtime
+# path (config, fonts, logo, screenshots, downloads) must use _BASE_DIR so
+# they land beside the exe in C:\ImpactLED\CloudPlayer\ instead of being
+# lost in a throwaway temp folder.
+_BASE_DIR = Path(sys.executable if getattr(sys, 'frozen', False)
+                 else os.path.abspath(__file__)).parent
 
 import pygame
 
@@ -76,7 +85,7 @@ except ImportError:
 # Config  (persisted to player_config.json beside the script)
 # ══════════════════════════════════════════════════════════════════════════════
 
-CONFIG_PATH = Path(__file__).parent / 'player_config.json'
+CONFIG_PATH = _BASE_DIR / 'player_config.json'
 
 @dataclass
 class Config:
@@ -513,7 +522,7 @@ _preferred_font_file: Optional[str] = None
 
 # Logo cache – keyed by rendered height (int → Surface or None)
 _logo_cache: dict = {}
-_LOGO_PATH = Path(__file__).parent / 'cloudpluslogoinvert.png'
+_LOGO_PATH = _BASE_DIR / 'cloudpluslogoinvert.png'
 
 
 def _get_logo(height: int) -> Optional[pygame.Surface]:
@@ -551,7 +560,7 @@ _CJK_FONT_NAMES = [
 _LATIN_FONT_NAMES = ['arial','tahoma','verdana','calibri','segoeui','helvetica']
 
 # Local fonts folder – drop .ttf / .otf files here to make them available.
-_FONT_DIR = Path(__file__).parent / 'fonts'
+_FONT_DIR = _BASE_DIR / 'fonts'
 
 
 def _find_best_font_file() -> Optional[str]:
@@ -2755,7 +2764,7 @@ def draw_hud(screen, prog, page_idx, pages, cfg, sx, sy, ox, oy, cms=None):
 
 def _save_screenshot(screen: pygame.Surface):
     ts   = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    path = Path(__file__).parent / f'screenshot_{ts}.png'
+    path = _BASE_DIR / f'screenshot_{ts}.png'
     try:
         pygame.image.save(screen, str(path))
         print(f'[Screenshot] Saved: {path.name}')
@@ -3035,7 +3044,7 @@ def run(vsn_path: Optional[str], cfg: Config):
 
     # ── CMS cloud sync ────────────────────────────────────────────────────────
     dl_dir = Path(cfg.cms_dl_dir) if cfg.cms_dl_dir \
-             else Path(__file__).parent / 'downloads'
+             else _BASE_DIR / 'downloads'
     dl_dir.mkdir(parents=True, exist_ok=True)
     vsn_q: _queue.Queue = _queue.Queue(maxsize=4)
     cms: Optional[CMSClient] = None
