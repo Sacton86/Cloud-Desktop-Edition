@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-VERSION = "1.0.7"
+VERSION = "1.0.8"
 
 def _runtime_version() -> str:
     """Return the installed release tag from version.txt if present, else VERSION."""
@@ -1321,7 +1321,20 @@ class CMSClient:
 
     def _local_api_loop(self):
         """Exposes a local HTTP server so the CMS can read/set player state."""
-        import http.server
+        import http.server, zlib, struct
+
+        def _make_placeholder_png():
+            def _chunk(tag, data):
+                raw = tag + data
+                return struct.pack('>I', len(data)) + raw + struct.pack('>I', zlib.crc32(raw) & 0xFFFFFFFF)
+            return (
+                b'\x89PNG\r\n\x1a\n'
+                + _chunk(b'IHDR', struct.pack('>IIBBBBB', 1, 1, 8, 2, 0, 0, 0))
+                + _chunk(b'IDAT', zlib.compress(b'\x00\x00\x00\x00'))
+                + _chunk(b'IEND', b'')
+            )
+
+        _PLACEHOLDER_PNG = _make_placeholder_png()
         client = self
 
         class _Handler(http.server.BaseHTTPRequestHandler):
@@ -1337,6 +1350,14 @@ class CMSClient:
                 self.send_header('Access-Control-Allow-Headers', 'Content-Type,Authorization')
                 self.end_headers()
                 self.wfile.write(body)
+
+            def _send_image(self, data, ctype='image/png'):
+                self.send_response(200)
+                self.send_header('Content-Type', ctype)
+                self.send_header('Content-Length', str(len(data)))
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(data)
 
             def do_OPTIONS(self):
                 self.send_response(204)
@@ -1376,14 +1397,13 @@ class CMSClient:
                     with client._screenshot_lock:
                         png = client._screenshot_png
                     if png:
-                        self.send_response(200)
-                        self.send_header('Content-Type', 'image/png')
-                        self.send_header('Content-Length', str(len(png)))
-                        self.send_header('Access-Control-Allow-Origin', '*')
-                        self.end_headers()
-                        self.wfile.write(png)
+                        self._send_image(png, 'image/png')
                     else:
                         self._send_json({'code': 404, 'msg': 'no screenshot yet'}, 404)
+                elif p.startswith('/images/'):
+                    # CMS requests program thumbnails at /images/{name}.files/{name}.jpeg
+                    # Serve a 1x1 placeholder so the canvas doesn't crash with height=0
+                    self._send_image(_PLACEHOLDER_PNG, 'image/png')
                 else:
                     self._send_json({'code': 404, 'msg': 'not found'}, 404)
 
