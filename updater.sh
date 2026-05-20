@@ -60,7 +60,9 @@ run_as_user() {
 section "[1/4]  Checking Installed Version"
 
 CURRENT_VERSION="unknown"
-if [[ -f "$INSTALL_DIR/player.py" ]]; then
+if [[ -f "$INSTALL_DIR/version.txt" ]]; then
+    CURRENT_VERSION=$(cat "$INSTALL_DIR/version.txt" | tr -d '[:space:]')
+elif [[ -f "$INSTALL_DIR/player.py" ]]; then
     CURRENT_VERSION=$(grep -m1 '^VERSION\s*=' "$INSTALL_DIR/player.py" \
                         | grep -oP '"\K[^"]+' || echo "unknown")
 fi
@@ -182,6 +184,10 @@ run_as_user restart "$SERVICE_NAME" && ok "Service restarted." \
     || warn "Service restart deferred — it will pick up on next boot."
 
 rm -rf "$TMP_DIR"
+
+# Record installed version so player.py and future updater runs can read it
+printf '%s' "$LATEST_TAG" > "$INSTALL_DIR/version.txt"
+ok "Recorded version   : ${LATEST_TAG}"
 
 # ── Summary ──────────────────────────────────────────────────────
 echo

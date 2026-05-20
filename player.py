@@ -1,5 +1,19 @@
 #!/usr/bin/env python3
-VERSION = "0.9.0"
+VERSION = "1.0.5"
+
+def _runtime_version() -> str:
+    """Return the installed release tag from version.txt if present, else VERSION."""
+    import os, sys
+    base = os.path.dirname(sys.executable if getattr(sys, 'frozen', False) else os.path.abspath(__file__))
+    vfile = os.path.join(base, 'version.txt')
+    try:
+        with open(vfile) as _f:
+            v = _f.read().strip()
+        if v:
+            return v
+    except OSError:
+        pass
+    return VERSION
 """
 Impact Cloud+ Desktop Player  –  Windows 10 / Linux desktop
 Plays .vsn program files for LED sign displays.
@@ -891,6 +905,7 @@ class CMSClient:
             try:
                 self._ws_connect()
                 attempt = 0
+                self._stop.wait(timeout=5)
             except Exception as exc:
                 d = delays[min(attempt, len(delays) - 1)]
                 attempt += 1
@@ -959,7 +974,7 @@ class CMSClient:
             on_message=on_message,
             on_close=on_close,
             on_error=on_error,
-        ).run_forever()
+        ).run_forever(ping_interval=30, ping_timeout=10)
 
     def _handle_ws_command(self, cmd: dict):
         raw_field = cmd.get('content', {}).get('raw', '')
@@ -1086,7 +1101,7 @@ class CMSClient:
             self._stop.wait(timeout=60)
 
     def _local_vsn_list(self) -> list:
-        """Return all .vsn files in dl_dir as a Colorlight vsns.contents list."""
+        """Return vsns.contents in Colorlight grouped format: [{type, content:[{name,size,md5,publishedmd5}]}]."""
         items = []
         try:
             for f in sorted(self.dl_dir.iterdir()):
@@ -1095,10 +1110,10 @@ class CMSClient:
                         size = f.stat().st_size
                     except OSError:
                         size = 0
-                    items.append({'name': f.name, 'size': size, 'type': 'vsn'})
+                    items.append({'name': f.name, 'size': size, 'md5': '', 'publishedmd5': ''})
         except Exception:
             pass
-        return items
+        return [{'type': 'internet', 'content': items}] if items else []
 
     @staticmethod
     def _local_ip() -> str:
@@ -1176,7 +1191,7 @@ class CMSClient:
             },
             'vsns': {
                 'contents':     self._local_vsn_list(),
-                'playing':      {'name': playing_name, 'type': 'vsn'},
+                'playing':      {'name': playing_name, 'type': 'internet'},
                 '_report_time': now,
             },
             'dimension': {
@@ -1355,7 +1370,7 @@ class CMSClient:
                 elif p in ('/api/vsns', '/api/vsns.json'):
                     self._send_json({'code': 0, 'data': {
                         'contents': client._local_vsn_list(),
-                        'playing':  {'name': client._current_vsn or '', 'type': 'vsn'},
+                        'playing':  {'name': client._current_vsn or '', 'type': 'internet'},
                     }})
                 elif p in ('/api/screenshot', '/api/screenshot.png'):
                     with client._screenshot_lock:
@@ -2907,6 +2922,9 @@ def draw_welcome(screen: pygame.Surface, cfg: Config,
         ds = hf.render(f' {desc}', True, (140, 145, 165))
         screen.blit(ds, (hx, hy))
         hx += ds.get_width() + 20
+
+    vs = hf.render(_runtime_version(), True, (70, 75, 95))
+    screen.blit(vs, (sw - vs.get_width() - 12, hy))
 
 
 def run(vsn_path: Optional[str], cfg: Config):
