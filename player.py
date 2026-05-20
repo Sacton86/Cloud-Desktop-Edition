@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-VERSION = "1.0.8"
+VERSION = "1.0.9"
 
 def _runtime_version() -> str:
     """Return the installed release tag from version.txt if present, else VERSION."""
@@ -974,7 +974,7 @@ class CMSClient:
             on_message=on_message,
             on_close=on_close,
             on_error=on_error,
-        ).run_forever(ping_interval=30, ping_timeout=10)
+        ).run_forever()
 
     def _handle_ws_command(self, cmd: dict):
         raw_field = cmd.get('content', {}).get('raw', '')
@@ -2943,7 +2943,7 @@ def draw_welcome(screen: pygame.Surface, cfg: Config,
         screen.blit(ds, (hx, hy))
         hx += ds.get_width() + 20
 
-    vs = hf.render(_runtime_version(), True, (140, 145, 165))
+    vs = hf.render(_runtime_version(), True, (210, 215, 230))
     screen.blit(vs, (sw - vs.get_width() - 12, hy))
 
 
