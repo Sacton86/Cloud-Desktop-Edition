@@ -78,6 +78,18 @@ sudo bash updater.sh
 
 ---
 
+## Uninstall
+
+Run the following in an **Administrator Command Prompt** to stop the player, remove both Task Scheduler jobs, and delete all installed files:
+
+```cmd
+schtasks /end /tn "ImpactLED Cloud+ Desktop Player" >nul 2>&1 && schtasks /end /tn "ImpactLED Cloud+ Updater" >nul 2>&1 && schtasks /delete /tn "ImpactLED Cloud+ Desktop Player" /f && schtasks /delete /tn "ImpactLED Cloud+ Updater" /f && taskkill /f /im "ImpactLED-Cloud-Player.exe" >nul 2>&1 && rmdir /s /q "C:\ImpactLED"
+```
+
+> **Note:** This permanently deletes `player_config.json` including stored credentials. Record the Terminal ID and Terminal Secret before uninstalling if the device will be reinstalled.
+
+---
+
 ## Releasing a New Version (maintainers)
 
 Commit your changes, then push a version tag:
