@@ -7,6 +7,7 @@
   "bar_color": "0xFF000000",
   "loop": true,
   "show_hud": false,
+  "show_fps": false,
   "last_dir": "",
   "brightness": 100,
   "timezone": "",
@@ -17,5 +18,6 @@
   "cms_password": "YOUR_CMS_PASSWORD",
   "cms_interval": 30,
   "cms_dl_dir": "",
-  "device_sn": "YOUR_DEVICE_SERIAL_NUMBER"
+  "device_sn": "YOUR_DEVICE_SERIAL_NUMBER",
+  "device_type": "windows"
 }

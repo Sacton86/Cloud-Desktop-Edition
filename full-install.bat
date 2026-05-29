@@ -57,11 +57,56 @@ set "CONFIG_PATH=%INSTALL_DIR%\player_config.json"
 set "LAUNCHER=%INSTALL_DIR%\run_player.bat"
 set "TASK_NAME=ImpactLED Cloud+ Desktop Player"
 set "DOWNLOAD_URL=https://github.com/Sacton86/Cloud-Desktop-Edition/releases/latest/download/ImpactLED-Cloud-Player.zip"
+set "LAUNCHER_ONLY=0"
 
 :: ================================================================
-::  [1/4]  Download latest release from GitHub
+::  Existing install detection
 :: ================================================================
-echo   [*]  [1/4]  Downloading Latest Release from GitHub...
+if exist "%CONFIG_PATH%" (
+    echo   [!]  Existing installation detected at %INSTALL_DIR%
+    echo.
+    echo   What would you like to do?
+    echo.
+    echo       1)  Update launcher / device type only
+    echo           (keeps your existing credentials and config — use this
+    echo            to add Samsung PrismView support to an existing device)
+    echo.
+    echo       2)  Full reinstall
+    echo           (re-downloads the player and overwrites all settings)
+    echo.
+    echo       3)  Cancel
+    echo.
+    :existing_prompt
+    set /p "_exist_choice=  ? Choice [1] : "
+    if "!_exist_choice!"=="" set "_exist_choice=1"
+    if "!_exist_choice!"=="1" (
+        set "LAUNCHER_ONLY=1"
+        echo.
+        echo   [OK]  Launcher-only update selected -- credentials will not be changed.
+        echo.
+        goto :skip_download
+    )
+    if "!_exist_choice!"=="2" (
+        echo.
+        echo   [OK]  Full reinstall selected.
+        echo.
+        goto :do_download
+    )
+    if "!_exist_choice!"=="3" (
+        echo.
+        echo   Cancelled.
+        pause
+        exit /b 0
+    )
+    echo   [ERROR]  Please enter 1, 2, or 3.
+    goto :existing_prompt
+)
+
+:: ================================================================
+::  [1/5]  Download latest release from GitHub
+:: ================================================================
+:do_download
+echo   [*]  [1/5]  Downloading Latest Release from GitHub...
 echo   ----------------------------------------------------------------
 echo.
 echo   .  Downloading... please wait.
@@ -77,9 +122,9 @@ echo   [OK]  Download complete.
 echo.
 
 :: ================================================================
-::  [2/4]  Extract and install files
+::  [2/5]  Extract and install files
 :: ================================================================
-echo   [*]  [2/4]  Installing to %INSTALL_DIR%...
+echo   [*]  [2/5]  Installing to %INSTALL_DIR%...
 echo   ----------------------------------------------------------------
 echo.
 
@@ -119,10 +164,51 @@ if not exist "%INSTALL_DIR%\ImpactLED-Cloud-Player.exe" (
 echo   [OK]  Files installed to %INSTALL_DIR%
 echo.
 
+:skip_download
+
 :: ================================================================
-::  [3/4]  Device Configuration
+::  [3/5]  Device Type
 :: ================================================================
-echo   [*]  [3/4]  Device Configuration
+echo   [*]  [3/5]  Device Type
+echo   ----------------------------------------------------------------
+echo.
+echo   Select the type of device being installed:
+echo.
+echo       1)  Windows 10/11       (standard PC or mini-PC)
+echo       2)  Samsung PrismView   (Prismview hardware with System Matrix)
+echo.
+
+set "VSN_DEVICE_TYPE_NUM="
+if defined VSN_DEVICE_TYPE (
+    echo   Device type : [provided via environment: %VSN_DEVICE_TYPE%]
+    goto :device_type_set
+)
+
+:device_type_prompt
+set /p "VSN_DEVICE_TYPE_NUM=  ? Device type [1] : "
+if "!VSN_DEVICE_TYPE_NUM!"=="" set "VSN_DEVICE_TYPE_NUM=1"
+if "!VSN_DEVICE_TYPE_NUM!"=="1" (
+    set "VSN_DEVICE_TYPE=windows"
+    goto :device_type_set
+)
+if "!VSN_DEVICE_TYPE_NUM!"=="2" (
+    set "VSN_DEVICE_TYPE=samsung"
+    goto :device_type_set
+)
+echo   [ERROR]  Please enter 1 or 2.
+goto :device_type_prompt
+
+:device_type_set
+echo   [OK]  Device type : %VSN_DEVICE_TYPE%
+echo.
+
+:: Skip credentials and config write when updating launcher only
+if "%LAUNCHER_ONLY%"=="1" goto :write_launcher
+
+:: ================================================================
+::  [4/5]  Device Configuration
+:: ================================================================
+echo   [*]  [4/5]  Device Configuration
 echo   ----------------------------------------------------------------
 echo.
 echo   Enter your Terminal ID, Secret, and display settings.
@@ -205,7 +291,7 @@ echo.
 :: ================================================================
 echo   .  Writing player_config.json...
 
-powershell -NoProfile -Command "$fs = ($env:VSN_FULLSCREEN -eq 'true'); $cfg = [ordered]@{ width = [int]$env:VSN_WIDTH; height = [int]$env:VSN_HEIGHT; fullscreen = $fs; fit_mode = 'native'; fps = 60; bar_color = '0xFF000000'; loop = $true; show_hud = $false; last_dir = ''; brightness = 100; timezone = ''; locale_code = ''; cms_enabled = $true; cms_server = $env:VSN_CMS_SERVER; cms_username = $env:VSN_TERMINAL_ID; cms_password = $env:VSN_TERMINAL_SECRET; cms_interval = 30; cms_dl_dir = '' }; $json = ConvertTo-Json $cfg; [System.IO.File]::WriteAllText($env:CONFIG_PATH, $json)"
+powershell -NoProfile -Command "$fs = ($env:VSN_FULLSCREEN -eq 'true'); $cfg = [ordered]@{ width = [int]$env:VSN_WIDTH; height = [int]$env:VSN_HEIGHT; fullscreen = $fs; fit_mode = 'native'; fps = 60; bar_color = '0xFF000000'; loop = $true; show_hud = $false; show_fps = $false; last_dir = ''; brightness = 100; timezone = ''; locale_code = ''; cms_enabled = $true; cms_server = $env:VSN_CMS_SERVER; cms_username = $env:VSN_TERMINAL_ID; cms_password = $env:VSN_TERMINAL_SECRET; cms_interval = 30; cms_dl_dir = ''; device_type = $env:VSN_DEVICE_TYPE }; $json = ConvertTo-Json $cfg; [System.IO.File]::WriteAllText($env:CONFIG_PATH, $json)"
 
 if %errorlevel% neq 0 (
     echo   [ERROR]  Failed to write player_config.json.
@@ -220,24 +306,67 @@ echo   [OK]  Downloads dir  -^>  %INSTALL_DIR%\downloads
 echo.
 
 :: ================================================================
-::  [4/4]  Launcher + Task Scheduler
+::  [5/5]  Launcher + Task Scheduler
 :: ================================================================
-echo   [*]  [4/4]  Startup Task (Task Scheduler)
+:write_launcher
+:: In launcher-only mode: patch device_type in the existing config JSON
+if "%LAUNCHER_ONLY%"=="1" (
+    powershell -NoProfile -Command "try { $f = '%CONFIG_PATH%'; $j = ConvertFrom-Json (Get-Content $f -Raw); $j | Add-Member -Force -NotePropertyName 'device_type' -NotePropertyValue '%VSN_DEVICE_TYPE%'; [System.IO.File]::WriteAllText($f, (ConvertTo-Json $j)) } catch { Write-Host 'Config patch failed: ' $_ }"
+    echo   [OK]  device_type updated in existing config  -^>  %VSN_DEVICE_TYPE%
+    echo.
+)
+
+echo   [*]  [5/5]  Startup Task (Task Scheduler)
 echo   ----------------------------------------------------------------
 echo.
 
-:: Write crash-restarting launcher
-(
-    echo @echo off
-    echo title ImpactLED Cloud+ Desktop Player
-    echo :loop
-    echo cd /d "%INSTALL_DIR%"
-    echo "%INSTALL_DIR%\ImpactLED-Cloud-Player.exe"
-    echo echo.
-    echo echo   [ImpactLED Cloud+ Desktop Player exited -- restarting in 5 seconds...]
-    echo timeout /t 5 /nobreak ^>nul
-    echo goto loop
-) > "%LAUNCHER%"
+:: Write launcher — Samsung gets System Matrix watchdog, standard gets simple restart loop
+if /i "%VSN_DEVICE_TYPE%"=="samsung" (
+    echo   .  Writing Samsung launcher with System Matrix watchdog...
+    (
+        echo @echo off
+        echo title ImpactLED Cloud+ Desktop Player  [Samsung PrismView]
+        echo set "SM_EXE=C:\Program Files\Prismview\System Matrix\System Matrix.exe"
+        echo.
+        echo :: Ensure System Matrix is running before the player starts
+        echo :check_sm
+        echo tasklist /fi "imagename eq System Matrix.exe" 2^>nul ^| find /i "System Matrix.exe" ^>nul
+        echo if %%errorlevel%% neq 0 (
+        echo     echo   [System Matrix] Not running -- starting...
+        echo     start "" "%%SM_EXE%%"
+        echo     timeout /t 5 /nobreak ^>nul
+        echo )
+        echo.
+        echo :loop
+        echo cd /d "%INSTALL_DIR%"
+        echo "%INSTALL_DIR%\ImpactLED-Cloud-Player.exe"
+        echo echo.
+        echo echo   [ImpactLED Cloud+ Desktop Player exited -- restarting in 5 seconds...]
+        echo timeout /t 5 /nobreak ^>nul
+        echo.
+        echo :: Re-check System Matrix on every restart
+        echo tasklist /fi "imagename eq System Matrix.exe" 2^>nul ^| find /i "System Matrix.exe" ^>nul
+        echo if %%errorlevel%% neq 0 (
+        echo     echo   [System Matrix] Crashed -- restarting System Matrix...
+        echo     start "" "%%SM_EXE%%"
+        echo     timeout /t 5 /nobreak ^>nul
+        echo )
+        echo goto loop
+    ) > "%LAUNCHER%"
+) else (
+    echo   .  Writing standard launcher...
+    (
+        echo @echo off
+        echo title ImpactLED Cloud+ Desktop Player
+        echo :loop
+        echo cd /d "%INSTALL_DIR%"
+        echo "%INSTALL_DIR%\ImpactLED-Cloud-Player.exe"
+        echo echo.
+        echo echo   [ImpactLED Cloud+ Desktop Player exited -- restarting in 5 seconds...]
+        echo timeout /t 5 /nobreak ^>nul
+        echo goto loop
+    ) > "%LAUNCHER%"
+)
 echo   [OK]  Launcher written  -^>  %LAUNCHER%
 
 :: Register with Task Scheduler
@@ -287,12 +416,19 @@ echo.
 ::  Summary
 :: ================================================================
 echo   ==============================================================
-echo     [OK]  Installation complete!
+if "%LAUNCHER_ONLY%"=="1" (
+    echo     [OK]  Launcher update complete!
+) else (
+    echo     [OK]  Installation complete!
+)
 echo   ==============================================================
 echo.
-echo     Terminal ID    :  %VSN_TERMINAL_ID%
-echo     Display        :  %VSN_WIDTH% x %VSN_HEIGHT%  (fullscreen: %VSN_FULLSCREEN%)
-echo     Cloud+ server  :  %VSN_CMS_SERVER%
+echo     Device type    :  %VSN_DEVICE_TYPE%
+if "%LAUNCHER_ONLY%"=="0" (
+    echo     Terminal ID    :  %VSN_TERMINAL_ID%
+    echo     Display        :  %VSN_WIDTH% x %VSN_HEIGHT%  (fullscreen: %VSN_FULLSCREEN%)
+    echo     Cloud+ server  :  %VSN_CMS_SERVER%
+)
 echo     Install dir    :  %INSTALL_DIR%
 echo     Config file    :  %CONFIG_PATH%
 echo.

@@ -4,6 +4,8 @@ setlocal
 set "INSTALL_DIR=C:\ImpactLED\CloudPlayer"
 set "PLAYER_TASK=ImpactLED Cloud+ Desktop Player"
 set "VERSION_FILE=%INSTALL_DIR%\version.txt"
+set "CONFIG_FILE=%INSTALL_DIR%\player_config.json"
+set "LAUNCHER=%INSTALL_DIR%\run_player.bat"
 set "GITHUB_API=https://api.github.com/repos/Sacton86/Cloud-Desktop-Edition/releases/latest"
 set "DOWNLOAD_URL=https://github.com/Sacton86/Cloud-Desktop-Edition/releases/latest/download/ImpactLED-Cloud-Player.zip"
 set "TMP_ZIP=%TEMP%\impactled-update.zip"
@@ -48,13 +50,58 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-:: ── Install (player_config.json is not in the zip - credentials safe) ──
+:: ── Install (player_config.json and run_player.bat are not in the zip) ──
 xcopy /e /i /y /q "%TMP_EXTRACT%\*" "%INSTALL_DIR%\"
 del /q "%TMP_ZIP%" 2>nul
 rmdir /s /q "%TMP_EXTRACT%" 2>nul
 
 :: ── Record new version ───────────────────────────────────────────
 powershell -NoProfile -Command "[System.IO.File]::WriteAllText('%INSTALL_DIR%\version.txt', '%LATEST%')"
+
+:: ── Rewrite launcher if device_type is samsung ───────────────────
+:: Reads device_type from player_config.json — if samsung, rewrites
+:: run_player.bat with the System Matrix watchdog so it survives updates.
+set "DEVICE_TYPE=windows"
+if exist "%CONFIG_FILE%" (
+    powershell -NoProfile -Command "try { $j = ConvertFrom-Json (Get-Content '%CONFIG_FILE%' -Raw); if ($j.device_type) { [System.IO.File]::WriteAllText('%TEMP%\__impactled_dt.txt', $j.device_type) } } catch {}"
+    if exist "%TEMP%\__impactled_dt.txt" (
+        set /p DEVICE_TYPE=<"%TEMP%\__impactled_dt.txt"
+        del /q "%TEMP%\__impactled_dt.txt" 2>nul
+    )
+)
+
+if /i "%DEVICE_TYPE%"=="samsung" (
+    (
+        echo @echo off
+        echo title ImpactLED Cloud+ Desktop Player  [Samsung PrismView]
+        echo set "SM_EXE=C:\Program Files\Prismview\System Matrix\System Matrix.exe"
+        echo.
+        echo :: Ensure System Matrix is running before the player starts
+        echo :check_sm
+        echo tasklist /fi "imagename eq System Matrix.exe" 2^>nul ^| find /i "System Matrix.exe" ^>nul
+        echo if %%errorlevel%% neq 0 (
+        echo     echo   [System Matrix] Not running -- starting...
+        echo     start "" "%%SM_EXE%%"
+        echo     timeout /t 5 /nobreak ^>nul
+        echo )
+        echo.
+        echo :loop
+        echo cd /d "%INSTALL_DIR%"
+        echo "%INSTALL_DIR%\ImpactLED-Cloud-Player.exe"
+        echo echo.
+        echo echo   [ImpactLED Cloud+ Desktop Player exited -- restarting in 5 seconds...]
+        echo timeout /t 5 /nobreak ^>nul
+        echo.
+        echo :: Re-check System Matrix on every restart
+        echo tasklist /fi "imagename eq System Matrix.exe" 2^>nul ^| find /i "System Matrix.exe" ^>nul
+        echo if %%errorlevel%% neq 0 (
+        echo     echo   [System Matrix] Crashed -- restarting System Matrix...
+        echo     start "" "%%SM_EXE%%"
+        echo     timeout /t 5 /nobreak ^>nul
+        echo )
+        echo goto loop
+    ) > "%LAUNCHER%"
+)
 
 :: ── Restart player ───────────────────────────────────────────────
 schtasks /run /tn "%PLAYER_TASK%" >nul 2>&1

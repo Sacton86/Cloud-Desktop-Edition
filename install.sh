@@ -194,6 +194,7 @@ if command -v jq &>/dev/null; then
             bar_color:    "0xFF000000",
             loop:         true,
             show_hud:     false,
+            show_fps:     false,
             last_dir:     "",
             brightness:   100,
             timezone:     "",
@@ -203,7 +204,8 @@ if command -v jq &>/dev/null; then
             cms_username: $tid,
             cms_password: $tsecret,
             cms_interval: 30,
-            cms_dl_dir:   ""
+            cms_dl_dir:   "",
+            device_type:  "linux"
         }' > "$CONFIG_PATH"
 else
     escape_json() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
@@ -220,6 +222,7 @@ else
   "bar_color": "0xFF000000",
   "loop": true,
   "show_hud": false,
+  "show_fps": false,
   "last_dir": "",
   "brightness": 100,
   "timezone": "",
@@ -229,7 +232,8 @@ else
   "cms_username": "%s",
   "cms_password": "%s",
   "cms_interval": 30,
-  "cms_dl_dir": ""
+  "cms_dl_dir": "",
+  "device_type": "linux"
 }\n' \
         "$VSN_WIDTH" "$VSN_HEIGHT" "$FULLSCREEN_JSON" \
         "$ESC_SERVER" "$ESC_TID" "$ESC_TSECRET" \

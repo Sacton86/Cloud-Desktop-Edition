@@ -109,6 +109,8 @@ class Config:
     cms_interval: int   = 30          # poll interval in seconds
     cms_dl_dir:   str   = ''          # download dir; blank = downloads/ beside player.py
     device_sn:    str   = ''          # Device SN – auto-generated on first run
+    device_type:  str   = 'windows'   # windows | samsung | linux
+    show_fps:     bool  = False       # show live FPS counter in bottom-right corner
 
     def save(self):
         try:
@@ -2475,6 +2477,7 @@ class SettingsOverlay:
         ('Target FPS',           'fps',           'choice', [15, 25, 30, 60]),
         ('Loop program',         'loop',          'bool',   None),
         ('Show info HUD',        'show_hud',      'bool',   None),
+        ('Show FPS counter',     'show_fps',      'bool',   None),
         ('Brightness (%)',       'brightness',    'int',    (0, 100)),
         ('Timezone',             'timezone',      'str',    64),
         ('Locale',               'locale_code',   'str',    32),
@@ -2736,6 +2739,18 @@ class SettingsOverlay:
 # ══════════════════════════════════════════════════════════════════════════════
 # Info HUD
 # ══════════════════════════════════════════════════════════════════════════════
+
+def draw_fps(screen: pygame.Surface, clock: pygame.time.Clock):
+    f    = ui_font(14)
+    text = f"FPS: {clock.get_fps():.1f}"
+    s    = f.render(text, True, (200, 200, 200))
+    sh_  = f.render(text, True, (0, 0, 0))
+    sw, sh = screen.get_size()
+    x = sw - s.get_width() - 8
+    y = sh - s.get_height() - 8
+    screen.blit(sh_, (x + 1, y + 1))
+    screen.blit(s,   (x,     y))
+
 
 def draw_hud(screen, prog, page_idx, pages, cfg, sx, sy, ox, oy, cms=None):
     f    = ui_font(16)
@@ -3212,6 +3227,8 @@ def run(vsn_path: Optional[str], cfg: Config):
             page       = pages[page_idx]
             br,bg,bb,_ = page.bg_clr
             screen.fill(bar_clr)
+            if cfg.show_fps:
+                draw_fps(screen, clock)
             sw, sh = screen.get_size()
             prog_rect = pygame.Rect(ox, oy,
                                     int(prog.width  * sx),
