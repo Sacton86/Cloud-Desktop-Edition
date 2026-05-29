@@ -2,6 +2,18 @@
 
 ---
 
+## v1.0.13 — 2026-05-29
+
+### Fixes
+
+- **Mid-video flash on playlist loop-back fixed** — after the v1.0.11 preseed fix eliminated the loop-restart stutter, a new one-frame flash appeared at the start of each loop. The preseed was seeking to frame 0 and then running the video forward at full speed while the page was off-screen. When the page looped back, `render()` read a mid-video frame from the running-ahead buffer before the second seek completed, blitting one frame of wrong content. Fixed by buffering exactly one frame (frame 0) during preseed and parking the decode thread — `self._raw` stays at frame 0 while the page is off-screen, so the first blit on resume is always clean.
+
+- **Installer crash on re-run fixed** (`full-install.bat`) — re-running the installer on a device with an existing installation produced a "Update was unexpected at this time" CMD error and exited. Root cause: the retry label (`:existing_prompt`) was placed inside a parenthesized `if` block, which is invalid in Windows CMD. Restructured the existing-install detection to use a top-level `goto`-based skip, which is valid in all CMD versions.
+
+- **SSL certificate verification** (from v1.0.12) — bundled the certifi CA store in the PyInstaller exe and configured `requests` and `websocket-client` to use it. Eliminates `ssl.SSLCertVerificationError` in the player console and prevents periodic mid-playback stutters caused by SSL timeout retries on background threads starving the render thread.
+
+---
+
 ## v1.0.11 — 2026-05-29
 
 ### New Features
