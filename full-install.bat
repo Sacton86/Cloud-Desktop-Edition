@@ -62,45 +62,46 @@ set "LAUNCHER_ONLY=0"
 :: ================================================================
 ::  Existing install detection
 :: ================================================================
-if exist "%CONFIG_PATH%" (
-    echo   [!]  Existing installation detected at %INSTALL_DIR%
+if not exist "%CONFIG_PATH%" goto :do_download
+
+echo   [!]  Existing installation detected at %INSTALL_DIR%
+echo.
+echo   What would you like to do?
+echo.
+echo       1)  Update launcher / device type only
+echo           (keeps your existing credentials and config -- use this
+echo            to add Samsung PrismView support to an existing device)
+echo.
+echo       2)  Full reinstall
+echo           (re-downloads the player and overwrites all settings)
+echo.
+echo       3)  Cancel
+echo.
+
+:existing_prompt
+set /p "_exist_choice=  ? Choice [1] : "
+if "!_exist_choice!"=="" set "_exist_choice=1"
+if "!_exist_choice!"=="1" (
+    set "LAUNCHER_ONLY=1"
     echo.
-    echo   What would you like to do?
+    echo   [OK]  Launcher-only update selected -- credentials will not be changed.
     echo.
-    echo       1)  Update launcher / device type only
-    echo           (keeps your existing credentials and config — use this
-    echo            to add Samsung PrismView support to an existing device)
-    echo.
-    echo       2)  Full reinstall
-    echo           (re-downloads the player and overwrites all settings)
-    echo.
-    echo       3)  Cancel
-    echo.
-    :existing_prompt
-    set /p "_exist_choice=  ? Choice [1] : "
-    if "!_exist_choice!"=="" set "_exist_choice=1"
-    if "!_exist_choice!"=="1" (
-        set "LAUNCHER_ONLY=1"
-        echo.
-        echo   [OK]  Launcher-only update selected -- credentials will not be changed.
-        echo.
-        goto :skip_download
-    )
-    if "!_exist_choice!"=="2" (
-        echo.
-        echo   [OK]  Full reinstall selected.
-        echo.
-        goto :do_download
-    )
-    if "!_exist_choice!"=="3" (
-        echo.
-        echo   Cancelled.
-        pause
-        exit /b 0
-    )
-    echo   [ERROR]  Please enter 1, 2, or 3.
-    goto :existing_prompt
+    goto :skip_download
 )
+if "!_exist_choice!"=="2" (
+    echo.
+    echo   [OK]  Full reinstall selected.
+    echo.
+    goto :do_download
+)
+if "!_exist_choice!"=="3" (
+    echo.
+    echo   Cancelled.
+    pause
+    exit /b 0
+)
+echo   [ERROR]  Please enter 1, 2, or 3.
+goto :existing_prompt
 
 :: ================================================================
 ::  [1/5]  Download latest release from GitHub
