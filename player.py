@@ -1804,6 +1804,7 @@ class VideoRenderer(BaseRenderer):
         self._lock          = threading.Lock()
         self._stop          = threading.Event()
         self._restart       = threading.Event()  # main thread → restart from frame 0
+        self._preseed_only  = threading.Event()  # set during preseed: decode one frame then park
         self._last_render   = 0.0      # monotonic time of last render() call
 
         if CV2_AVAILABLE:
@@ -1827,12 +1828,27 @@ class VideoRenderer(BaseRenderer):
         finished = False
 
         while not self._stop.is_set():
-            # If a restart was requested (page became active), seek to frame 0.
+            # If a restart was requested, seek to frame 0.
             if self._restart.is_set():
                 self._cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 self._restart.clear()
                 next_t   = time.monotonic()
                 finished = False
+                if self._preseed_only.is_set():
+                    # Preseed mode: decode exactly one frame (frame 0) then park.
+                    # This prevents the video from running ahead off-screen, which
+                    # would cause a mid-video flash on the first render when the page
+                    # loops back and render() triggers a second seek via _restart.
+                    self._preseed_only.clear()
+                    ok, frame = self._cap.read()
+                    if ok:
+                        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        frame = cv2.resize(frame, (w, h))
+                        with self._lock:
+                            self._raw     = frame
+                            self._raw_ver += 1
+                    finished = True
+                    continue
 
             # When finished, idle until a restart signal arrives.
             if finished:
@@ -1860,9 +1876,11 @@ class VideoRenderer(BaseRenderer):
                 next_t = time.monotonic()
 
     def preseed(self):
-        """Signal the decode thread to seek to frame 0 now, while this page is
-        off-screen, so the first frame is buffered and ready when we come back."""
+        """Seek to frame 0 while the page is off-screen and buffer exactly one
+        frame so it is ready when the page loops back, without running the video
+        ahead (which would cause a mid-video flash on the first render)."""
         if self._cap is not None:
+            self._preseed_only.set()
             self._restart.set()
 
     def render(self, surf):
@@ -1875,6 +1893,7 @@ class VideoRenderer(BaseRenderer):
         now = time.monotonic()
         # First render or page switch (> 0.5 s gap) → restart from frame 0.
         if self._last_render == 0.0 or (now - self._last_render > 0.5):
+            self._preseed_only.clear()  # ensure full playback, not preseed-one-frame
             self._restart.set()
         self._last_render = now
 
