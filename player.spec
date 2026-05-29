@@ -26,9 +26,12 @@ a = Analysis(
         *collect_data_files('pygame'),
         # opencv ships its own DLLs
         *collect_data_files('cv2'),
+        # certifi CA bundle — required for SSL verification in the frozen exe
+        *collect_data_files('certifi'),
     ],
     hiddenimports=[
         # These are inside try/except blocks so PyInstaller won't detect them
+        'certifi',
         'feedparser',
         'websocket',
         'websocket._abnf',

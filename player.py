@@ -47,6 +47,15 @@ from typing import List, Optional, Tuple
 _BASE_DIR = Path(sys.executable if getattr(sys, 'frozen', False)
                  else os.path.abspath(__file__)).parent
 
+# Point requests and websocket-client at the bundled certifi CA store so SSL
+# certificate verification works inside the PyInstaller exe on Windows.
+try:
+    import certifi as _certifi
+    os.environ.setdefault('SSL_CERT_FILE',      _certifi.where())
+    os.environ.setdefault('REQUESTS_CA_BUNDLE', _certifi.where())
+except Exception:
+    pass
+
 import pygame
 
 # ── optional deps ──────────────────────────────────────────────────────────────
@@ -979,13 +988,19 @@ class CMSClient:
         def on_error(ws, err):
             print(f'[Cloud+ WS] Error: {err}')
 
+        _sslopt = {}
+        try:
+            import certifi as _c
+            _sslopt = {'ca_certs': _c.where()}
+        except Exception:
+            pass
         _websocket_lib.WebSocketApp(
             url,
             on_open=on_open,
             on_message=on_message,
             on_close=on_close,
             on_error=on_error,
-        ).run_forever()
+        ).run_forever(sslopt=_sslopt)
 
     def _handle_ws_command(self, cmd: dict):
         raw_field = cmd.get('content', {}).get('raw', '')
