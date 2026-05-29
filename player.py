@@ -1821,7 +1821,7 @@ class VideoRenderer(BaseRenderer):
 
             # When finished, idle until a restart signal arrives.
             if finished:
-                time.sleep(0.05)
+                self._restart.wait(timeout=0.05)
                 continue
 
             sleep_t = next_t - time.monotonic()
@@ -1843,6 +1843,12 @@ class VideoRenderer(BaseRenderer):
             next_t += period
             if next_t < time.monotonic() - period:
                 next_t = time.monotonic()
+
+    def preseed(self):
+        """Signal the decode thread to seek to frame 0 now, while this page is
+        off-screen, so the first frame is buffered and ready when we come back."""
+        if self._cap is not None:
+            self._restart.set()
 
     def render(self, surf):
         self._fill_bg(surf)
@@ -3220,6 +3226,12 @@ def run(vsn_path: Optional[str], cfg: Config):
                 limit   = pages[page_idx].duration / 1000.0
                 if limit > 0 and elapsed >= limit:
                     if cfg.loop or page_idx < len(pages) - 1:
+                        # Preseed departing page's videos so they seek to frame 0
+                        # while other pages play — eliminates seek delay on loop-back.
+                        for _rs in page_regions[page_idx]:
+                            for _rend in _rs._rends:
+                                if isinstance(_rend, VideoRenderer):
+                                    _rend.preseed()
                         page_idx    = (page_idx + 1) % len(pages)
                         page_t      = time.monotonic()
                         pause_extra = 0.0

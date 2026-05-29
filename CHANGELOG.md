@@ -25,6 +25,8 @@
 
 ### Fixes / Improvements
 
+- **Video playlist loop stutter fixed** — eliminated the noticeable delay when an MP4 playlist restarts from the beginning. Previously, each video would seek to frame 0 only after the page became visible, causing a 100–200 ms freeze on the first frame. Videos now preseed (seek and buffer frame 0) immediately when their page transitions away, so the first frame is ready by the time the playlist loops back. The decode thread idle sleep was also changed from a fixed 50 ms poll to an event wait, so it wakes up immediately when a preseed is requested.
+
 - **Console output restored** — `player.spec` changed from `console=False` to `console=True`. All player log output (`[Cloud+]`, `[WS]`, `[Screenshot]`, `[VSN]`, etc.) now appears live in the console window below the player.
 
 ---
