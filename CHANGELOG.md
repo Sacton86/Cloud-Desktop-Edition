@@ -2,6 +2,14 @@
 
 ---
 
+## v1.0.15 — 2026-06-02
+
+### Fix
+
+- **Decode thread crash on page change** — `_decode_loop` raised `AttributeError: 'NoneType' object has no attribute 'read'` when `destroy()` fired while the thread was between its `_stop` check and the `cap.read()` call. Fixed by snapshotting `cap = self._cap` at the top of each iteration and breaking immediately on `None`, so the thread exits cleanly regardless of when `destroy()` fires.
+
+---
+
 ## v1.0.14 — 2026-06-02
 
 ### Performance Fixes
