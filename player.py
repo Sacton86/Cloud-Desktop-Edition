@@ -1833,9 +1833,13 @@ class VideoRenderer(BaseRenderer):
         finished = False
 
         while not self._stop.is_set():
+            cap = self._cap
+            if cap is None:
+                break
+
             # If a restart was requested, seek to frame 0.
             if self._restart.is_set():
-                self._cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 self._restart.clear()
                 next_t   = time.monotonic()
                 finished = False
@@ -1845,7 +1849,7 @@ class VideoRenderer(BaseRenderer):
                     # would cause a mid-video flash on the first render when the page
                     # loops back and render() triggers a second seek via _restart.
                     self._preseed_only.clear()
-                    ok, frame = self._cap.read()
+                    ok, frame = cap.read()
                     if ok:
                         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                         frame = cv2.resize(frame, (w, h))
@@ -1864,7 +1868,7 @@ class VideoRenderer(BaseRenderer):
             if sleep_t > 0:
                 time.sleep(sleep_t)
 
-            ok, frame = self._cap.read()
+            ok, frame = cap.read()
             if not ok:
                 # Video finished — hold last frame; wait for restart signal.
                 finished = True
