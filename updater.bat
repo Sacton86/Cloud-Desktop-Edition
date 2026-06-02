@@ -44,7 +44,7 @@ echo.
 
 :: ── Download new release ─────────────────────────────────────────
 echo  [1/4]  Downloading %LATEST%...
-curl -f --progress-bar "%DOWNLOAD_URL%" -o "%TMP_ZIP%"
+curl -fL --progress-bar "%DOWNLOAD_URL%" -o "%TMP_ZIP%"
 if %errorlevel% neq 0 (
     echo.
     echo  [ERROR]  Download failed. Player will continue with current version.
@@ -60,7 +60,7 @@ timeout /t 5 /nobreak >nul
 :: ── Extract ──────────────────────────────────────────────────────
 echo  [3/4]  Extracting update...
 if exist "%TMP_EXTRACT%" rmdir /s /q "%TMP_EXTRACT%"
-powershell -NoProfile -Command "Expand-Archive -Path '%TMP_ZIP%' -DestinationPath '%TMP_EXTRACT%' -Force"
+powershell -NoProfile -Command "try { Expand-Archive -Path '%TMP_ZIP%' -DestinationPath '%TMP_EXTRACT%' -Force } catch { exit 1 }"
 if %errorlevel% neq 0 (
     echo.
     echo  [ERROR]  Extraction failed. Restarting player with current version.
