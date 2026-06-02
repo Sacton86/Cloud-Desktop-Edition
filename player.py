@@ -954,7 +954,7 @@ class CMSClient:
             _hb_running.set()
             def _heartbeat():
                 while _hb_running.is_set() and not self._stop.is_set():
-                    self._stop.wait(timeout=55)
+                    self._stop.wait(timeout=25)
                     if self._stop.is_set():
                         break
                     try:
@@ -1811,7 +1811,12 @@ class VideoRenderer(BaseRenderer):
             path = resolve_path(self.item.filesrc, self.vsn_dir, self.vsn_stem)
             if path:
                 try:
-                    self._cap = cv2.VideoCapture(path)
+                    _backend = cv2.CAP_MSMF if hasattr(cv2, 'CAP_MSMF') else 0
+                    self._cap = cv2.VideoCapture(path, _backend) if _backend else cv2.VideoCapture(path)
+                    if _backend and not self._cap.isOpened():
+                        self._cap = cv2.VideoCapture(path)
+                    if hasattr(cv2, 'CAP_PROP_HW_ACCELERATION') and hasattr(cv2, 'VIDEO_ACCELERATION_ANY'):
+                        self._cap.set(cv2.CAP_PROP_HW_ACCELERATION, cv2.VIDEO_ACCELERATION_ANY)
                     self._fps = self._cap.get(cv2.CAP_PROP_FPS) or 25.0
                     fc = self._cap.get(cv2.CAP_PROP_FRAME_COUNT)
                     if fc > 0 and self._fps > 0:
@@ -1903,12 +1908,18 @@ class VideoRenderer(BaseRenderer):
         if raw is not None and ver != self._surf_ver:
             try:
                 self._frame = pygame.image.frombuffer(
-                    raw.tobytes(), (raw.shape[1], raw.shape[0]), 'RGB')
+                    raw, (raw.shape[1], raw.shape[0]), 'RGB')
                 self._surf_ver = ver
             except Exception as e:
                 print(f"[Video] frame error: {e}")
         if self._frame:
             surf.blit(self._frame, self.srect.topleft)
+
+    def destroy(self):
+        self._stop.set()
+        if self._cap is not None:
+            self._cap.release()
+            self._cap = None
 
 
 # ── Text (single-line Type 4 / multi-line Type 5) ────────────────────────────
@@ -2482,20 +2493,54 @@ class RegionState:
             r, g, b, _ = self.region.rect.border_clr
             pygame.draw.rect(surf, (r, g, b), self.srect, self._bw)
 
+    def destroy(self):
+        for rend in self._rends:
+            if hasattr(rend, 'destroy'):
+                rend.destroy()
+
+
+class PageSlot:
+    """Deferred container for one page's RegionState list.
+
+    Renderers are only created on activate() and released on deactivate(),
+    keeping at most one page worth of VideoCapture objects open at a time.
+    """
+    def __init__(self, page, sx, sy, ox, oy, vsn_dir, vsn_stem):
+        self._page     = page
+        self._sx       = sx;  self._sy = sy
+        self._ox       = ox;  self._oy = oy
+        self._vsn_dir  = vsn_dir
+        self._vsn_stem = vsn_stem
+        self._states:  List[RegionState] = []
+
+    def activate(self) -> 'List[RegionState]':
+        if not self._states:
+            self._states = [
+                RegionState(r, self._sx, self._sy, self._ox, self._oy,
+                            self._vsn_dir, self._vsn_stem)
+                for r in sorted(self._page.regions, key=lambda rr: rr.layer)
+            ]
+            # Override page duration with actual video file length when available.
+            for rs in self._states:
+                for rend in rs._rends:
+                    if isinstance(rend, VideoRenderer) and rend._duration_ms > 0:
+                        self._page.duration = max(self._page.duration, rend._duration_ms)
+        return self._states
+
+    def deactivate(self):
+        for rs in self._states:
+            rs.destroy()
+        self._states = []
+
+    def __iter__(self):
+        return iter(self._states)
+
+    def __len__(self):
+        return len(self._states)
+
 
 def build_page_regions(pages, sx, sy, ox, oy, vsn_dir, vsn_stem):
-    result = []
-    for page in pages:
-        rs = [RegionState(r, sx, sy, ox, oy, vsn_dir, vsn_stem)
-              for r in sorted(page.regions, key=lambda rr: rr.layer)]
-        result.append(rs)
-        # Override page duration with actual video file length when available,
-        # so the slide lasts exactly as long as the video plays.
-        for region_state in rs:
-            for rend in region_state._rends:
-                if isinstance(rend, VideoRenderer) and rend._duration_ms > 0:
-                    page.duration = max(page.duration, rend._duration_ms)
-    return result
+    return [PageSlot(page, sx, sy, ox, oy, vsn_dir, vsn_stem) for page in pages]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2547,15 +2592,42 @@ class SettingsOverlay:
         self._edit       = ''         # current digit string
         self._selectable = [i for i, d in enumerate(self.DEFS) if d[2] != 'sep']
         self.extra_action: str = ''   # set when a non-apply/discard action fires
+        self._hover_row:      int               = -1
+        self._dropdown:       int               = -1
+        self._dropdown_rects: List[pygame.Rect] = []
+        self._row_rects:      List[pygame.Rect] = []
+        self._panel_rect:     Optional[pygame.Rect] = None
 
     # ── Input ────────────────────────────────────────────────────────────────
 
     def handle(self, ev) -> Tuple[bool, bool]:
         """Returns (closed, applied)."""
+        # ── Mouse ────────────────────────────────────────────────────────────
+        if ev.type == pygame.MOUSEBUTTONDOWN:
+            if ev.button == 1:
+                return self._handle_click(ev.pos)
+            if ev.button in (4, 5):              # scroll wheel pygame-1 compat
+                if self._dropdown < 0 and not self._editing:
+                    self._move(-1 if ev.button == 4 else 1)
+            return False, False
+        if ev.type == pygame.MOUSEWHEEL:
+            if self._dropdown < 0 and not self._editing:
+                self._move(-ev.y)
+            return False, False
+        if ev.type == pygame.MOUSEMOTION:
+            self._update_hover(ev.pos)
+            return False, False
+
+        # ── Keyboard ─────────────────────────────────────────────────────────
         if ev.type != pygame.KEYDOWN:
             return False, False
 
         k = ev.key
+
+        if self._dropdown >= 0:
+            if k == pygame.K_ESCAPE:
+                self._dropdown = -1
+            return False, False
 
         if self._editing:
             return self._handle_edit(k, ev.unicode)
@@ -2573,6 +2645,49 @@ class SettingsOverlay:
             self._nudge(-1 if k == pygame.K_LEFT else 1)
 
         return False, False
+
+    def _handle_click(self, pos) -> Tuple[bool, bool]:
+        # Cancel any active text edit on click
+        if self._editing:
+            self._editing = False
+            self._edit    = ''
+        # Dropdown open — pick option or dismiss
+        if self._dropdown >= 0:
+            for i, r in enumerate(self._dropdown_rects):
+                if r.collidepoint(pos):
+                    _, attr, _, extra = self.DEFS[self._dropdown]
+                    setattr(self.cfg, attr, extra[i])
+                    self._dropdown = -1
+                    return False, False
+            self._dropdown = -1
+            return False, False
+        # Click outside panel → discard
+        if self._panel_rect and not self._panel_rect.collidepoint(pos):
+            return True, False
+        # Row hit-test
+        for row_i, r in enumerate(self._row_rects):
+            if r.collidepoint(pos):
+                label, attr, kind, extra = self.DEFS[row_i]
+                if kind == 'sep':
+                    return False, False
+                if row_i in self._selectable:
+                    self.sel = self._selectable.index(row_i)
+                if kind == 'choice':
+                    self._dropdown = row_i if self._dropdown != row_i else -1
+                    return False, False
+                return self._activate()
+        return False, False
+
+    def _update_hover(self, pos):
+        self._hover_row = -1
+        if self._dropdown >= 0:
+            return
+        for row_i, r in enumerate(self._row_rects):
+            if r.collidepoint(pos):
+                _, _, kind, _ = self.DEFS[row_i]
+                if kind != 'sep':
+                    self._hover_row = row_i
+                break
 
     def _move(self, d):
         idx  = self._selectable.index(self._selectable[self.sel] if self._selectable else 0)
@@ -2670,6 +2785,7 @@ class SettingsOverlay:
     def draw(self, screen: pygame.Surface):
         sw, sh = screen.get_size()
         n_rows  = len(self.DEFS)
+        self._row_rects = []
 
         # Fit panel width to screen
         panel_w = min(self.W, sw - self.PAD * 2)
@@ -2689,6 +2805,7 @@ class SettingsOverlay:
         panel_h = title_h + n_rows * row_h + self.PAD * 2
         px = (sw - panel_w) // 2
         py = max(0, (sh - panel_h) // 2)
+        self._panel_rect = pygame.Rect(px, py, panel_w, panel_h)
 
         # Dim background
         dim = pygame.Surface((sw, sh), pygame.SRCALPHA)
@@ -2714,6 +2831,7 @@ class SettingsOverlay:
         for row_i, (label, attr, kind, extra) in enumerate(self.DEFS):
             ry     = py + title_h + self.PAD + row_i * row_h
             is_sel = (row_i == sel_row_i)
+            self._row_rects.append(pygame.Rect(px, ry, panel_w, row_h))
 
             if kind == 'sep':
                 pygame.draw.line(screen, (60,70,90),
@@ -2721,9 +2839,12 @@ class SettingsOverlay:
                                  (px+panel_w-self.PAD, ry+row_h//2), 1)
                 continue
 
-            # Highlight selected row
+            # Highlight selected or hovered row
             if is_sel:
                 pygame.draw.rect(screen, (50, 80, 130),
+                                 (px+2, ry, panel_w-4, row_h-2))
+            elif row_i == self._hover_row:
+                pygame.draw.rect(screen, (40, 55, 80),
                                  (px+2, ry, panel_w-4, row_h-2))
 
             label_clr = (220,220,220) if kind != 'action' else (100,200,120)
@@ -2762,18 +2883,50 @@ class SettingsOverlay:
                         val_str = f'  {shown}'
                         val_clr = (120, 200, 255) if raw else (100, 100, 120)
                 else:  # choice
-                    val_str = f'  {cur}'
-                    val_clr = (120,200,255)
+                    arrow   = ' ▲' if self._dropdown == row_i else ' ▼'
+                    val_str = f'  {cur}{arrow}'
+                    val_clr = (120, 200, 255)
 
                 vs = vf.render(val_str, True, val_clr)
                 screen.blit(vs, (px + panel_w - vs.get_width() - self.PAD,
                                  ry + (row_h - vs.get_height()) // 2))
 
-        hint_txt = ('↑↓ select  ·  ←→ change  ·  Enter edit  ·  Esc discard'
+        hint_txt = ('↑↓/click select  ·  ←→ change  ·  Enter edit  ·  Esc discard'
                     if scale < 0.85 else
-                    'UP/DOWN select  ·  LEFT/RIGHT change  ·  ENTER edit  ·  Ctrl+V paste  ·  ESC discard')
+                    'UP/DOWN/click select  ·  LEFT/RIGHT change  ·  ENTER edit  ·  Ctrl+V paste  ·  scroll wheel  ·  ESC discard')
         hint = ui_font(max(9, int(14 * scale))).render(hint_txt, True, (100,100,130))
         screen.blit(hint, (px + self.PAD, py + panel_h - hint.get_height() - 6))
+
+        # Dropdown popup — drawn last so it renders on top of all rows
+        if self._dropdown >= 0 and self._dropdown < len(self._row_rects):
+            _, attr, _, opts = self.DEFS[self._dropdown]
+            cur_val  = getattr(self.cfg, attr)
+            base_r   = self._row_rects[self._dropdown]
+            item_h   = row_h
+            drop_w   = base_r.width
+            drop_h   = len(opts) * item_h + 4
+            drop_x   = base_r.x
+            drop_y   = base_r.bottom
+            if drop_y + drop_h > sh:
+                drop_y = base_r.y - drop_h
+            pygame.draw.rect(screen, (35, 40, 55), (drop_x, drop_y, drop_w, drop_h))
+            pygame.draw.rect(screen, (80, 130, 200), (drop_x, drop_y, drop_w, drop_h), 1)
+            mx, my = pygame.mouse.get_pos()
+            self._dropdown_rects = []
+            for i, opt in enumerate(opts):
+                iy = drop_y + 2 + i * item_h
+                dr = pygame.Rect(drop_x + 1, iy, drop_w - 2, item_h)
+                self._dropdown_rects.append(dr)
+                is_cur = (str(opt) == str(cur_val))
+                is_hov = dr.collidepoint(mx, my)
+                if is_hov:
+                    pygame.draw.rect(screen, (60, 100, 160), dr)
+                elif is_cur:
+                    pygame.draw.rect(screen, (45, 65, 100), dr)
+                clr = (255, 230, 80) if is_cur else (210, 210, 210)
+                ds  = vf.render(f'  {opt}', True, clr)
+                screen.blit(ds, (dr.x + self.PAD // 2,
+                                 dr.y + (item_h - ds.get_height()) // 2))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -3068,9 +3221,13 @@ def run(vsn_path: Optional[str], cfg: Config):
         nonlocal sx, sy, ox, oy, page_regions
         if prog is None:
             return
+        for slot in page_regions:
+            slot.deactivate()
         sw, sh = screen.get_size()
         sx, sy, ox, oy = compute_layout(prog.width, prog.height, sw, sh, cfg.fit_mode)
         page_regions = build_page_regions(pages, sx, sy, ox, oy, vsn_dir, vsn_stem)
+        if page_regions:
+            page_regions[page_idx % len(page_regions)].activate()
 
     def _open_file():
         """Open file picker and load chosen VSN (called from main thread only)."""
@@ -3201,12 +3358,16 @@ def run(vsn_path: Optional[str], cfg: Config):
                             pause_extra += time.monotonic() - _pause_st; paused = False
 
                     elif k == pygame.K_RIGHT:
+                        page_regions[page_idx].deactivate()
                         page_idx = (page_idx + 1) % len(pages)
                         page_t = time.monotonic(); pause_extra = 0.0
+                        page_regions[page_idx].activate()
 
                     elif k == pygame.K_LEFT:
+                        page_regions[page_idx].deactivate()
                         page_idx = (page_idx - 1) % len(pages)
                         page_t = time.monotonic(); pause_extra = 0.0
+                        page_regions[page_idx].activate()
 
                     elif k == pygame.K_i:
                         cfg.show_hud = not cfg.show_hud
@@ -3260,15 +3421,11 @@ def run(vsn_path: Optional[str], cfg: Config):
                 limit   = pages[page_idx].duration / 1000.0
                 if limit > 0 and elapsed >= limit:
                     if cfg.loop or page_idx < len(pages) - 1:
-                        # Preseed departing page's videos so they seek to frame 0
-                        # while other pages play — eliminates seek delay on loop-back.
-                        for _rs in page_regions[page_idx]:
-                            for _rend in _rs._rends:
-                                if isinstance(_rend, VideoRenderer):
-                                    _rend.preseed()
+                        page_regions[page_idx].deactivate()
                         page_idx    = (page_idx + 1) % len(pages)
                         page_t      = time.monotonic()
                         pause_extra = 0.0
+                        page_regions[page_idx].activate()
 
             page       = pages[page_idx]
             br,bg,bb,_ = page.bg_clr

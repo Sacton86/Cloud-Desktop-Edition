@@ -2,6 +2,30 @@
 
 ---
 
+## v1.0.14 — 2026-06-02
+
+### Performance Fixes
+
+- **Lazy renderer initialization** — Renderers (VideoCapture decoders, GIF frame buffers) are now created only for the page currently playing. All other pages remain dormant until activated. Reduces peak RAM from ~1 GB+ (10 open decoders) to ~250–300 MB on a typical playlist. Previous behavior opened N decoders at startup regardless of which page was playing.
+
+- **Explicit renderer cleanup on page change and rebuild** — `VideoRenderer.destroy()` now stops the decode thread and calls `cap.release()`. `RegionState.destroy()` tears down all renderers in a region. On page advance, the departing page's renderers are destroyed before the next page activates. On `rebuild()` (CMS update, settings change), all old page slots are destroyed before new ones are created. Previously, old decode threads continued running indefinitely after every rebuild, accumulating ~30–50 MB of VideoCapture DPB each time — the primary cause of the progressive daily performance deterioration seen on deployed hardware.
+
+- **Intel Quick Sync hardware video decode** — `VideoRenderer` now requests the MSMF (Windows Media Foundation) backend with `VIDEO_ACCELERATION_ANY`. On Windows 10/11 with Intel graphics (including HD Graphics 505 on the deployed Atom E3950), H.264/H.265 decode is offloaded to the Quick Sync engine, removing the per-frame CPU decode cost entirely. Falls back to software decode if MSMF is unavailable.
+
+- **Zero-copy frame blit** — Removed `.tobytes()` from the numpy→pygame frame path. Numpy arrays implement the buffer protocol; `pygame.image.frombuffer()` accepts them directly, eliminating a full frame memory copy (~3 MB at 720p, ~6 MB at 1080p) on every rendered frame.
+
+### Reliability Fixes
+
+- **WebSocket heartbeat interval reduced to 25 s** — Cell modem NAT tables typically time out idle TCP connections in 30–90 s. The previous 55 s ping interval allowed the connection to silently drop, causing a reconnect that triggered the CMS to push `transmission/ftp/config`, which triggered a `rebuild()` — and with the old leak, each reconnect accumulated more leaked decoders. The 25 s interval keeps the connection alive through aggressive carrier NATs.
+
+### New Features
+
+- **F12 settings panel — mouse support** — The settings overlay now responds to mouse input: click a row to select it (same as arrow keys), scroll wheel to navigate the list, click a choice field to open a dropdown and select an option. Keyboard editing still works unchanged.
+
+- **Updater progress display** — `updater.bat` now shows a banner with current and target versions, four numbered steps (`[1/4]` Downloading → `[2/4]` Stopping → `[3/4]` Extracting → `[4/4]` Installing), a curl progress bar during download, and a completion message. Error conditions print a plain-text explanation before exiting.
+
+---
+
 ## v1.0.13 — 2026-05-29
 
 ### Fixes

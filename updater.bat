@@ -33,24 +33,44 @@ if not defined LATEST exit /b 0
 :: ── Compare versions ─────────────────────────────────────────────
 if "%CURRENT%"=="%LATEST%" exit /b 0
 
+title ImpactLED Cloud+ Desktop Player  [Updating %CURRENT% ^> %LATEST%]
+echo.
+echo  ============================================================
+echo   ImpactLED Cloud+ Desktop Player — Auto-Update
+echo   Installed : %CURRENT%
+echo   Available : %LATEST%
+echo  ============================================================
+echo.
+
 :: ── Download new release ─────────────────────────────────────────
-curl -fsSL "%DOWNLOAD_URL%" -o "%TMP_ZIP%"
-if %errorlevel% neq 0 exit /b 1
+echo  [1/4]  Downloading %LATEST%...
+curl -f --progress-bar "%DOWNLOAD_URL%" -o "%TMP_ZIP%"
+if %errorlevel% neq 0 (
+    echo.
+    echo  [ERROR]  Download failed. Player will continue with current version.
+    exit /b 1
+)
+echo.
 
 :: ── Stop player ──────────────────────────────────────────────────
+echo  [2/4]  Stopping player...
 schtasks /end /tn "%PLAYER_TASK%" >nul 2>&1
 timeout /t 5 /nobreak >nul
 
 :: ── Extract ──────────────────────────────────────────────────────
+echo  [3/4]  Extracting update...
 if exist "%TMP_EXTRACT%" rmdir /s /q "%TMP_EXTRACT%"
 powershell -NoProfile -Command "Expand-Archive -Path '%TMP_ZIP%' -DestinationPath '%TMP_EXTRACT%' -Force"
 if %errorlevel% neq 0 (
+    echo.
+    echo  [ERROR]  Extraction failed. Restarting player with current version.
     del /q "%TMP_ZIP%" 2>nul
     schtasks /run /tn "%PLAYER_TASK%" >nul 2>&1
     exit /b 1
 )
 
 :: ── Install (player_config.json and run_player.bat are not in the zip) ──
+echo  [4/4]  Installing %LATEST%...
 xcopy /e /i /y /q "%TMP_EXTRACT%\*" "%INSTALL_DIR%\"
 del /q "%TMP_ZIP%" 2>nul
 rmdir /s /q "%TMP_EXTRACT%" 2>nul
@@ -104,6 +124,9 @@ if /i "%DEVICE_TYPE%"=="samsung" (
 )
 
 :: ── Restart player ───────────────────────────────────────────────
+echo.
+echo  Update complete. Restarting player...
+echo.
 schtasks /run /tn "%PLAYER_TASK%" >nul 2>&1
 
 exit /b 0
