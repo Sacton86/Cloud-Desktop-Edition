@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-VERSION = "1.0.19"
+VERSION = "1.0.20"
 
 def _runtime_version() -> str:
     """Return the installed release tag from version.txt if present, else VERSION."""
@@ -1995,7 +1995,7 @@ class TextRenderer(BaseRenderer):
                 if PIL_AVAILABLE:
                     from PIL import Image as _PILImage
                     img = _PILImage.open(_io.BytesIO(data)).convert('RGBA')
-                    s = pygame.image.fromstring(img.tobytes(), img.size, 'RGBA')
+                    s = pygame.image.fromstring(img.tobytes(), img.size, 'RGBA').convert_alpha()
                 else:
                     s = pygame.image.load(_io.BytesIO(data)).convert_alpha()
                 self._surf = s
@@ -2270,9 +2270,16 @@ class WeatherRenderer(BaseRenderer):
     def render(self, surf):
         self._fill_bg(surf)
         data = self._fetcher.get()
+        is_multiline = self.item.type == '5' or self.item.multiline
+
         if data != self._last_data:
             self._last_data = data
-            self._pages   = self._make_pages(self._build_parts(data))
+            parts = self._build_parts(data)
+            if is_multiline:
+                # Show all parts stacked vertically as one block
+                self._pages = ['\n'.join(parts)]
+            else:
+                self._pages = self._make_pages(parts)
             self._page_idx = 0
             self._page_t   = time.monotonic()
             self._txt_rend = None
@@ -2281,9 +2288,9 @@ class WeatherRenderer(BaseRenderer):
             self._render_centered(surf, 'Fetching weather…', (160,160,160))
             return
 
-        # Advance auto-page when the current chunk has been shown long enough.
+        # Advance auto-page in single-line mode when the current chunk has been shown long enough.
         now = time.monotonic()
-        if len(self._pages) > 1 and (now - self._page_t) >= self._PAGE_DUR:
+        if not is_multiline and len(self._pages) > 1 and (now - self._page_t) >= self._PAGE_DUR:
             self._page_idx = (self._page_idx + 1) % len(self._pages)
             self._page_t   = now
             if self._txt_rend is not None:
@@ -2291,15 +2298,20 @@ class WeatherRenderer(BaseRenderer):
 
         text = self._pages[self._page_idx]
         if self._txt_rend is None:
-            # Use item.scroll (IsScroll flag) directly — never derive scroll from
-            # Speed, which for weather items is a data-refresh interval, not px/s.
-            fake = Item(type='4', text=text, text_clr=self.item.text_clr,
-                        back_clr=self.item.back_clr, font=self.item.font,
-                        scroll=self.item.scroll,
-                        scroll_by_time=self.item.scroll_by_time,
-                        spd=self.item.spd or 2.0,
-                        speed_px=self.item.speed_px if self.item.scroll else 0.0,
-                        head_tail=True, center=self.item.center)
+            if is_multiline:
+                fake = Item(type='5', text=text, text_clr=self.item.text_clr,
+                            back_clr=self.item.back_clr, font=self.item.font,
+                            scroll=False, multiline=True, center=self.item.center)
+            else:
+                # Use item.scroll (IsScroll flag) directly — never derive scroll from
+                # Speed, which for weather items is a data-refresh interval, not px/s.
+                fake = Item(type='4', text=text, text_clr=self.item.text_clr,
+                            back_clr=self.item.back_clr, font=self.item.font,
+                            scroll=self.item.scroll,
+                            scroll_by_time=self.item.scroll_by_time,
+                            spd=self.item.spd or 2.0,
+                            speed_px=self.item.speed_px if self.item.scroll else 0.0,
+                            head_tail=True, center=self.item.center)
             self._txt_rend = TextRenderer(fake, self.srect, self.sx, self.sy,
                                           self.vsn_dir, self.vsn_stem)
         self._txt_rend.render(surf)
