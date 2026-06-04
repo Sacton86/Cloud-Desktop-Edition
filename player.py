@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-VERSION = "1.0.17"
+VERSION = "1.0.18"
 
 def _runtime_version() -> str:
     """Return the installed release tag from version.txt if present, else VERSION."""
