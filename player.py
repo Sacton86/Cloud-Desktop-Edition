@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-VERSION = "1.0.16"
+VERSION = "1.0.17"
 
 def _runtime_version() -> str:
     """Return the installed release tag from version.txt if present, else VERSION."""
@@ -1737,9 +1737,24 @@ class BaseRenderer:
         r, g, b, _ = self.item.text_clr
         return (r, g, b)
 
+    def _font_render(self, font, text, color):
+        """Render text with a background that composites correctly over _fill_bg.
+
+        When opacity_bg == 0 the region background is transparent, so we set a
+        colorkey on the returned surface so the black AA fringe doesn't show.
+        When opacity_bg > 0 we pass the actual back_clr to font.render so pygame
+        blends the AA edges against the real background colour instead of black.
+        """
+        if self.item.opacity_bg <= 0:
+            s = font.render(text, True, color)
+            s.set_colorkey((0, 0, 0))
+            return s
+        r, g, b, _ = self.item.back_clr
+        return font.render(text, True, color, (r, g, b))
+
     def _render_centered(self, surf, text, color=(255,255,255)):
         try:
-            ts = self.font.render(text, True, color)
+            ts = self._font_render(self.font, text, color)
             x  = self.srect.x + (self.srect.w - ts.get_width())  // 2
             y  = self.srect.y + (self.srect.h - ts.get_height()) // 2
             surf.blit(ts, (x, y))
@@ -2002,7 +2017,7 @@ class TextRenderer(BaseRenderer):
 
         if self.item.type in ('4', '102') and not self.item.multiline:
             try:
-                s = self.font.render(txt, True, color)
+                s = self._font_render(self.font, txt, color)
                 self._surf = s; self._tw = s.get_width(); self._th = s.get_height()
             except Exception:
                 pass
@@ -2022,7 +2037,7 @@ class TextRenderer(BaseRenderer):
             canvas.fill((0, 0, 0, 0))
             for i, line in enumerate(lines):
                 try:
-                    ls = self.font.render(line, True, color)
+                    ls = self._font_render(self.font, line, color)
                     lx = (sw - ls.get_width()) // 2 if self.item.center else 0
                     canvas.blit(ls, (lx, i * fh))
                 except Exception:
@@ -2140,7 +2155,7 @@ class ClockRenderer(BaseRenderer):
         y0    = sr.y + (sr.h - total) // 2
         for i, line in enumerate(lines):
             try:
-                ts = self.font.render(line, True, color)
+                ts = self._font_render(self.font, line, color)
                 x  = sr.x + (sr.w - ts.get_width()) // 2
                 surf.blit(ts, (x, y0 + i * fh))
             except Exception:
@@ -2532,7 +2547,7 @@ class PageSlot:
             self._states = [
                 RegionState(r, self._sx, self._sy, self._ox, self._oy,
                             self._vsn_dir, self._vsn_stem)
-                for r in sorted(self._page.regions, key=lambda rr: rr.layer)
+                for r in sorted(self._page.regions, key=lambda rr: rr.layer, reverse=True)
             ]
             # Override page duration with actual video file length when available.
             for rs in self._states:
