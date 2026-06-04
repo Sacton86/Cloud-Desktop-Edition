@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-VERSION = "1.0.15"
+VERSION = "1.0.16"
 
 def _runtime_version() -> str:
     """Return the installed release tag from version.txt if present, else VERSION."""
@@ -890,6 +890,8 @@ class CMSClient:
         self._current_vsn = ''        # name of currently playing program
         self._force_queue  = False    # True during a WS-triggered sync
         self._last_force_t = 0.0     # monotonic time of last WS-forced sync
+        self._net_ok      = threading.Event()
+        self._net_ok.set()            # assume connectivity; cleared on DNS failure
 
         # Screenshot support
         self._screenshot_event = threading.Event()   # set by WS, cleared after capture
@@ -919,7 +921,7 @@ class CMSClient:
             print('[Cloud+ WS] websocket-client not installed – device will not show Online.')
             print('         Run:  pip install websocket-client --break-system-packages')
             return
-        delays = [5, 10, 20, 30, 60, 120]
+        delays = [5, 10, 20, 30, 60]
         attempt = 0
         while not self._stop.is_set():
             try:
@@ -927,6 +929,7 @@ class CMSClient:
                 attempt = 0
                 self._stop.wait(timeout=5)
             except Exception as exc:
+                self._net_ok.clear()
                 d = delays[min(attempt, len(delays) - 1)]
                 attempt += 1
                 print(f'[Cloud+ WS] {exc} – retry in {d}s')
@@ -947,10 +950,13 @@ class CMSClient:
         print(f'[Cloud+ WS] Connecting to {host}:8443 …')
 
         _hb_running = threading.Event()
+        _connected  = threading.Event()
 
         def on_open(ws):
             print('[Cloud+ WS] Connected – device is Online')
             self.status = 'online'
+            _connected.set()
+            self._net_ok.set()
             _hb_running.set()
             def _heartbeat():
                 while _hb_running.is_set() and not self._stop.is_set():
@@ -1001,6 +1007,9 @@ class CMSClient:
             on_close=on_close,
             on_error=on_error,
         ).run_forever(sslopt=_sslopt)
+
+        if not _connected.is_set():
+            raise ConnectionError(f'could not connect to {host}:8443')
 
     def _handle_ws_command(self, cmd: dict):
         raw_field = cmd.get('content', {}).get('raw', '')
@@ -1478,13 +1487,14 @@ class CMSClient:
             self._stop.wait(timeout=0.5)
 
         while not self._stop.is_set():
-            try:
-                self._sync()
-            except Exception as exc:
-                self.last_err = str(exc)
-                if self.status != 'online':
-                    self.status = 'error'
-                print(f'[Cloud+] {exc}')
+            if self._net_ok.is_set():
+                try:
+                    self._sync()
+                except Exception as exc:
+                    self.last_err = str(exc)
+                    if self.status != 'online':
+                        self.status = 'error'
+                    print(f'[Cloud+] {exc}')
             self._stop.wait(timeout=max(15, self.cfg.cms_interval))
 
     def _auth(self) -> dict:

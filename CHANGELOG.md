@@ -2,6 +2,16 @@
 
 ---
 
+## v1.0.16 — 2026-06-03
+
+### Fixes
+
+- **WS reconnect backoff now engages on DNS failure** — previously, `run_forever()` returning without raising (after `on_error` + `on_close` callbacks) caused the outer loop to treat each DNS failure as a clean exit, resetting `attempt` to 0 and retrying every 5 s indefinitely. Fixed by tracking whether `on_open` ever fired; if `run_forever()` exits without a successful connection, `_ws_connect()` raises so the backoff actually triggers. Max backoff cap reduced from 120 s to 60 s to keep recovery time reasonable when the modem comes back.
+
+- **CMS sync skips polling during connectivity outages** — added `_net_ok` shared flag (set on WS `on_open`, cleared when WS enters backoff). The download loop now skips `_sync()` calls while `_net_ok` is clear, eliminating the separate stream of HTTP connection errors that appeared alongside the WS reconnect storm during cell modem outages. Normal sync resumes automatically as soon as WS reconnects.
+
+---
+
 ## v1.0.15 — 2026-06-02
 
 ### Fix
