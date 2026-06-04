@@ -101,7 +101,8 @@ echo.
 :: ---- Stop player ----------------------------------------------------
 echo  [2/4]  Stopping player...
 schtasks /end /tn "%PLAYER_TASK%" >nul 2>&1
-timeout /t 5 /nobreak >nul
+taskkill /f /im ImpactLED-Cloud-Player.exe >nul 2>&1
+timeout /t 3 /nobreak >nul
 
 :: ---- Extract --------------------------------------------------------
 echo  [3/4]  Extracting update...
@@ -116,15 +117,25 @@ if not exist "%TMP_EXTRACT%\ImpactLED-Cloud-Player.exe" (
     echo           The downloaded ZIP may be corrupt. Restarting with current version.
     del /q "%TMP_ZIP%" 2>nul
     if exist "%TMP_EXTRACT%" rmdir /s /q "%TMP_EXTRACT%" 2>nul
-    schtasks /run /tn "%PLAYER_TASK%" >nul 2>&1
-    echo.
-    pause
-    exit /b 1
+    goto restart_player
 )
 
-:: ---- Install (player_config.json and run_player.bat are not in the zip) ----
+:: ---- Install --------------------------------------------------------
+:: updater.bat is excluded from xcopy to avoid overwriting this running
+:: script mid-execution (CMD reads by byte offset -- a replaced file causes
+:: it to jump to the wrong position and re-execute sections at random).
+:: The new updater.bat is staged as updater.bat.new and swapped in by a
+:: background process after this script exits.
 echo  [4/4]  Installing %LATEST%...
-xcopy /e /i /y /q "%TMP_EXTRACT%\*" "%INSTALL_DIR%\"
+echo updater.bat>"%TEMP%\__xl.txt"
+xcopy /e /i /y /q /EXCLUDE:"%TEMP%\__xl.txt" "%TMP_EXTRACT%\*" "%INSTALL_DIR%\"
+del /q "%TEMP%\__xl.txt" 2>nul
+
+:: Stage new updater for post-exit swap
+if exist "%TMP_EXTRACT%\updater.bat" (
+    copy /y "%TMP_EXTRACT%\updater.bat" "%INSTALL_DIR%\updater.bat.new" >nul 2>&1
+)
+
 del /q "%TMP_ZIP%" 2>nul
 rmdir /s /q "%TMP_EXTRACT%" 2>nul
 
@@ -174,14 +185,29 @@ if /i "%DEVICE_TYPE%"=="samsung" (
     ) > "%LAUNCHER%"
 )
 
-:: ---- Restart player -------------------------------------------------
 echo.
 echo  ============================================================
 echo   Update complete -- now running %LATEST%
-echo   Restarting player...
 echo  ============================================================
 echo.
-pause
-schtasks /run /tn "%PLAYER_TASK%" >nul 2>&1
 
+:: ---- Swap in new updater.bat after exit (background, 3 s delay) -----
+if exist "%INSTALL_DIR%\updater.bat.new" (
+    start /b cmd /c "timeout /t 3 /nobreak >nul && move /y ""%INSTALL_DIR%\updater.bat.new"" ""%INSTALL_DIR%\updater.bat"" >nul 2>&1"
+)
+
+:restart_player
+echo  Restarting player...
+echo.
+schtasks /run /tn "%PLAYER_TASK%" >nul 2>&1
+if %errorlevel% neq 0 (
+    :: Scheduled task not found or failed -- launch directly via the launcher
+    if exist "%LAUNCHER%" (
+        start "" "%LAUNCHER%"
+    ) else (
+        start "" "%INSTALL_DIR%\ImpactLED-Cloud-Player.exe"
+    )
+)
+
+pause
 exit /b 0
