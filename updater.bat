@@ -14,16 +14,16 @@ set "TMP_EXTRACT=%TEMP%\impactled-update-extract"
 title ImpactLED Cloud+ Desktop Player  [Updater]
 echo.
 echo  ============================================================
-echo   ImpactLED Cloud+ Desktop Player ^— Updater
+echo   ImpactLED Cloud+ Desktop Player -- Updater
 echo  ============================================================
 echo.
 
-:: ── Read installed version ────────────────────────────────────────
+:: ---- Read installed version -----------------------------------------
 set "CURRENT=unknown"
 if exist "%VERSION_FILE%" set /p CURRENT=<"%VERSION_FILE%"
 echo  Installed version : %CURRENT%
 
-:: ── Fetch latest release tag from GitHub ─────────────────────────
+:: ---- Fetch latest release tag from GitHub ---------------------------
 echo  Checking GitHub for latest release...
 curl -sf "%GITHUB_API%" -o "%TEMP%\__impactled_rel.json" 2>nul
 if %errorlevel% neq 0 (
@@ -54,7 +54,7 @@ if not defined LATEST (
 echo  Latest release    : %LATEST%
 echo.
 
-:: ── Compare versions ─────────────────────────────────────────────
+:: ---- Compare versions -----------------------------------------------
 if "%CURRENT%"=="%LATEST%" (
     echo  Already up to date. No update needed.
     echo.
@@ -62,55 +62,76 @@ if "%CURRENT%"=="%LATEST%" (
     exit /b 0
 )
 
-title ImpactLED Cloud+ Desktop Player  [Updating %CURRENT% ^> %LATEST%]
+title ImpactLED Cloud+ Desktop Player  [Updating %CURRENT% to %LATEST%]
 echo  ============================================================
-echo   Update available: %CURRENT% ^> %LATEST%
+echo   Update available: %CURRENT% -- ^> %LATEST%
 echo  ============================================================
 echo.
 
-:: ── Download new release ─────────────────────────────────────────
+:: ---- Download new release -------------------------------------------
 echo  [1/4]  Downloading %LATEST%...
-curl -fL --progress-bar "%DOWNLOAD_URL%" -o "%TMP_ZIP%"
+if exist "%TMP_ZIP%" del /q "%TMP_ZIP%"
+
+powershell -NoProfile -Command ^
+    "try { $wc = New-Object System.Net.WebClient; $wc.DownloadFile('%DOWNLOAD_URL%', '%TMP_ZIP%'); exit 0 } catch { Write-Host ('  [ERROR] ' + $_); exit 1 }"
+
 if %errorlevel% neq 0 (
     echo.
-    echo  [ERROR]  Download failed. Player will continue with current version.
+    echo  [ERROR]  Download failed. Check your connection and try again.
     echo.
     pause
     exit /b 1
 )
+
+:: Verify the download is a real ZIP and not an error page (must be >500 KB)
+set "ZIP_SIZE=0"
+for %%A in ("%TMP_ZIP%") do set "ZIP_SIZE=%%~zA"
+if %ZIP_SIZE% LSS 500000 (
+    echo.
+    echo  [ERROR]  Downloaded file is too small (%ZIP_SIZE% bytes^) -- likely a failed redirect.
+    echo           Delete %TMP_ZIP% and try again.
+    echo.
+    del /q "%TMP_ZIP%" 2>nul
+    pause
+    exit /b 1
+)
+echo  Download OK (%ZIP_SIZE% bytes^)
 echo.
 
-:: ── Stop player ──────────────────────────────────────────────────
+:: ---- Stop player ----------------------------------------------------
 echo  [2/4]  Stopping player...
 schtasks /end /tn "%PLAYER_TASK%" >nul 2>&1
 timeout /t 5 /nobreak >nul
 
-:: ── Extract ──────────────────────────────────────────────────────
+:: ---- Extract --------------------------------------------------------
 echo  [3/4]  Extracting update...
 if exist "%TMP_EXTRACT%" rmdir /s /q "%TMP_EXTRACT%"
-powershell -NoProfile -Command "try { Expand-Archive -Path '%TMP_ZIP%' -DestinationPath '%TMP_EXTRACT%' -Force } catch { exit 1 }"
-if %errorlevel% neq 0 (
+powershell -NoProfile -Command ^
+    "try { Expand-Archive -Path '%TMP_ZIP%' -DestinationPath '%TMP_EXTRACT%' -Force } catch { Write-Host ('  [ERROR] ' + $_) }"
+
+:: Verify the exe was actually extracted -- don't rely on errorlevel alone
+if not exist "%TMP_EXTRACT%\ImpactLED-Cloud-Player.exe" (
     echo.
-    echo  [ERROR]  Extraction failed. Restarting player with current version.
+    echo  [ERROR]  Extraction failed -- exe not found in extracted files.
+    echo           The downloaded ZIP may be corrupt. Restarting with current version.
     del /q "%TMP_ZIP%" 2>nul
+    if exist "%TMP_EXTRACT%" rmdir /s /q "%TMP_EXTRACT%" 2>nul
     schtasks /run /tn "%PLAYER_TASK%" >nul 2>&1
     echo.
     pause
     exit /b 1
 )
 
-:: ── Install (player_config.json and run_player.bat are not in the zip) ──
+:: ---- Install (player_config.json and run_player.bat are not in the zip) ----
 echo  [4/4]  Installing %LATEST%...
 xcopy /e /i /y /q "%TMP_EXTRACT%\*" "%INSTALL_DIR%\"
 del /q "%TMP_ZIP%" 2>nul
 rmdir /s /q "%TMP_EXTRACT%" 2>nul
 
-:: ── Record new version ───────────────────────────────────────────
+:: ---- Record new version ---------------------------------------------
 powershell -NoProfile -Command "[System.IO.File]::WriteAllText('%INSTALL_DIR%\version.txt', '%LATEST%')"
 
-:: ── Rewrite launcher if device_type is samsung ───────────────────
-:: Reads device_type from player_config.json — if samsung, rewrites
-:: run_player.bat with the System Matrix watchdog so it survives updates.
+:: ---- Rewrite launcher if device_type is samsung ---------------------
 set "DEVICE_TYPE=windows"
 if exist "%CONFIG_FILE%" (
     powershell -NoProfile -Command "try { $j = ConvertFrom-Json (Get-Content '%CONFIG_FILE%' -Raw); if ($j.device_type) { [System.IO.File]::WriteAllText('%TEMP%\__impactled_dt.txt', $j.device_type) } } catch {}"
@@ -153,10 +174,10 @@ if /i "%DEVICE_TYPE%"=="samsung" (
     ) > "%LAUNCHER%"
 )
 
-:: ── Restart player ───────────────────────────────────────────────
+:: ---- Restart player -------------------------------------------------
 echo.
 echo  ============================================================
-echo   Update complete: now running %LATEST%
+echo   Update complete -- now running %LATEST%
 echo   Restarting player...
 echo  ============================================================
 echo.
