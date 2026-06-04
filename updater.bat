@@ -11,13 +11,28 @@ set "DOWNLOAD_URL=https://github.com/Sacton86/Cloud-Desktop-Edition/releases/lat
 set "TMP_ZIP=%TEMP%\impactled-update.zip"
 set "TMP_EXTRACT=%TEMP%\impactled-update-extract"
 
+title ImpactLED Cloud+ Desktop Player  [Updater]
+echo.
+echo  ============================================================
+echo   ImpactLED Cloud+ Desktop Player ^— Updater
+echo  ============================================================
+echo.
+
 :: ── Read installed version ────────────────────────────────────────
 set "CURRENT=unknown"
 if exist "%VERSION_FILE%" set /p CURRENT=<"%VERSION_FILE%"
+echo  Installed version : %CURRENT%
 
 :: ── Fetch latest release tag from GitHub ─────────────────────────
+echo  Checking GitHub for latest release...
 curl -sf "%GITHUB_API%" -o "%TEMP%\__impactled_rel.json" 2>nul
-if %errorlevel% neq 0 exit /b 0
+if %errorlevel% neq 0 (
+    echo.
+    echo  [ERROR]  Could not reach GitHub. Check your internet connection.
+    echo.
+    pause
+    exit /b 0
+)
 
 set "LATEST="
 powershell -NoProfile -Command "try { $j = ConvertFrom-Json (Get-Content '%TEMP%\__impactled_rel.json' -Raw); [System.IO.File]::WriteAllText('%TEMP%\__impactled_tag.txt', $j.tag_name) } catch {}"
@@ -28,17 +43,28 @@ if exist "%TEMP%\__impactled_tag.txt" (
     del /q "%TEMP%\__impactled_tag.txt" 2>nul
 )
 
-if not defined LATEST exit /b 0
+if not defined LATEST (
+    echo.
+    echo  [ERROR]  Could not read latest release tag from GitHub API response.
+    echo.
+    pause
+    exit /b 0
+)
+
+echo  Latest release    : %LATEST%
+echo.
 
 :: ── Compare versions ─────────────────────────────────────────────
-if "%CURRENT%"=="%LATEST%" exit /b 0
+if "%CURRENT%"=="%LATEST%" (
+    echo  Already up to date. No update needed.
+    echo.
+    pause
+    exit /b 0
+)
 
 title ImpactLED Cloud+ Desktop Player  [Updating %CURRENT% ^> %LATEST%]
-echo.
 echo  ============================================================
-echo   ImpactLED Cloud+ Desktop Player — Auto-Update
-echo   Installed : %CURRENT%
-echo   Available : %LATEST%
+echo   Update available: %CURRENT% ^> %LATEST%
 echo  ============================================================
 echo.
 
@@ -48,6 +74,8 @@ curl -fL --progress-bar "%DOWNLOAD_URL%" -o "%TMP_ZIP%"
 if %errorlevel% neq 0 (
     echo.
     echo  [ERROR]  Download failed. Player will continue with current version.
+    echo.
+    pause
     exit /b 1
 )
 echo.
@@ -66,6 +94,8 @@ if %errorlevel% neq 0 (
     echo  [ERROR]  Extraction failed. Restarting player with current version.
     del /q "%TMP_ZIP%" 2>nul
     schtasks /run /tn "%PLAYER_TASK%" >nul 2>&1
+    echo.
+    pause
     exit /b 1
 )
 
@@ -125,8 +155,12 @@ if /i "%DEVICE_TYPE%"=="samsung" (
 
 :: ── Restart player ───────────────────────────────────────────────
 echo.
-echo  Update complete. Restarting player...
+echo  ============================================================
+echo   Update complete: now running %LATEST%
+echo   Restarting player...
+echo  ============================================================
 echo.
+pause
 schtasks /run /tn "%PLAYER_TASK%" >nul 2>&1
 
 exit /b 0
