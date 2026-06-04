@@ -81,6 +81,8 @@ Device type is automatically set to `linux` — no prompt required.
 - Player credentials and `player_config.json` are never overwritten during an update
 - Samsung PrismView devices: the updater reads `device_type` from `player_config.json` after each update and rewrites `run_player.bat` with the System Matrix watchdog automatically — the watchdog survives all future updates
 
+**Cell modem / intermittent connectivity** — the player is designed to run reliably on metered cell connections. When the modem drops, the player continues playing cached content. WebSocket reconnects use exponential backoff (5 → 10 → 20 → 30 → 60 s) so a dead connection does not hammer the modem. CMS sync pauses automatically during outages and resumes as soon as connectivity is restored — no manual intervention required.
+
 To force an immediate update check:
 ```cmd
 C:\ImpactLED\CloudPlayer\updater.bat
@@ -238,5 +240,6 @@ Cloud-Desktop-Edition/
 | Samsung PrismView — System Matrix watchdog | Done |
 | FPS counter (F12 toggle, bottom-right corner) | Done |
 | Console log output restored | Done |
+| Cell modem connectivity resilience (WS backoff + CMS sync gate) | Done |
 | Screenshot visible in CMS panel | Tabled |
 | Playlist history in CMS panel | Tabled |
