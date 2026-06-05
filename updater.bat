@@ -102,7 +102,17 @@ echo.
 echo  [2/4]  Stopping player...
 schtasks /end /tn "%PLAYER_TASK%" >nul 2>&1
 taskkill /f /im ImpactLED-Cloud-Player.exe >nul 2>&1
-timeout /t 3 /nobreak >nul
+
+:: Wait until the process is fully gone -- taskkill returns before Windows
+:: releases file handles, so a fixed 3s sleep was not always enough.
+:wait_exit
+tasklist /fi "imagename eq ImpactLED-Cloud-Player.exe" 2>nul | find /i "ImpactLED-Cloud-Player.exe" >nul
+if %errorlevel% equ 0 (
+    timeout /t 2 /nobreak >nul
+    goto wait_exit
+)
+:: Extra 2s after process list clears to let Windows release file handles
+timeout /t 2 /nobreak >nul
 
 :: ---- Extract --------------------------------------------------------
 echo  [3/4]  Extracting update...
@@ -128,7 +138,7 @@ if not exist "%TMP_EXTRACT%\ImpactLED-Cloud-Player.exe" (
 :: The new updater.bat is staged as updater.bat.new and swapped in AFTER
 :: this script exits (the swap is launched just before exit /b 0).
 echo  [4/4]  Installing %LATEST%...
-robocopy "%TMP_EXTRACT%" "%INSTALL_DIR%" /E /XF updater.bat /NFL /NDL /NJH /NJS /NP >nul 2>&1
+robocopy "%TMP_EXTRACT%" "%INSTALL_DIR%" /E /IS /IT /XF updater.bat /NFL /NDL /NJH /NJS /NP >nul 2>&1
 
 :: Stage new updater for post-exit swap
 if exist "%TMP_EXTRACT%\updater.bat" (
