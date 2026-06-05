@@ -121,15 +121,14 @@ if not exist "%TMP_EXTRACT%\ImpactLED-Cloud-Player.exe" (
 )
 
 :: ---- Install --------------------------------------------------------
-:: updater.bat is excluded from xcopy to avoid overwriting this running
-:: script mid-execution (CMD reads by byte offset -- a replaced file causes
-:: it to jump to the wrong position and re-execute sections at random).
-:: The new updater.bat is staged as updater.bat.new and swapped in by a
-:: background process after this script exits.
+:: robocopy /XF excludes updater.bat by filename so it is never overwritten
+:: while this script is still running.  CMD reads batch files by byte offset --
+:: overwriting the file mid-execution shifts offsets and causes random
+:: re-execution of earlier sections.
+:: The new updater.bat is staged as updater.bat.new and swapped in AFTER
+:: this script exits (the swap is launched just before exit /b 0).
 echo  [4/4]  Installing %LATEST%...
-echo updater.bat>"%TEMP%\__xl.txt"
-xcopy /e /i /y /q /EXCLUDE:"%TEMP%\__xl.txt" "%TMP_EXTRACT%\*" "%INSTALL_DIR%\"
-del /q "%TEMP%\__xl.txt" 2>nul
+robocopy "%TMP_EXTRACT%" "%INSTALL_DIR%" /E /XF updater.bat /NFL /NDL /NJH /NJS /NP >nul 2>&1
 
 :: Stage new updater for post-exit swap
 if exist "%TMP_EXTRACT%\updater.bat" (
@@ -191,11 +190,6 @@ echo   Update complete -- now running %LATEST%
 echo  ============================================================
 echo.
 
-:: ---- Swap in new updater.bat after exit (background, 3 s delay) -----
-if exist "%INSTALL_DIR%\updater.bat.new" (
-    start /b cmd /c "timeout /t 3 /nobreak >nul && move /y ""%INSTALL_DIR%\updater.bat.new"" ""%INSTALL_DIR%\updater.bat"" >nul 2>&1"
-)
-
 :restart_player
 echo  Restarting player...
 echo.
@@ -210,4 +204,11 @@ if %errorlevel% neq 0 (
 )
 
 pause
+
+:: Swap in new updater.bat now that the script is about to exit.
+:: Launching this after pause (not before) ensures CMD has finished reading
+:: this file before it is replaced -- the 2-second delay is just insurance.
+if exist "%INSTALL_DIR%\updater.bat.new" (
+    start /b cmd /c "timeout /t 2 /nobreak >nul && move /y ""%INSTALL_DIR%\updater.bat.new"" ""%INSTALL_DIR%\updater.bat"" >nul 2>&1"
+)
 exit /b 0
