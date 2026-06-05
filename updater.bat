@@ -102,6 +102,10 @@ echo.
 echo  [2/4]  Stopping player...
 schtasks /end /tn "%PLAYER_TASK%" >nul 2>&1
 taskkill /f /im ImpactLED-Cloud-Player.exe >nul 2>&1
+:: Also kill the cmd.exe launcher loop -- it holds run_player.bat open for
+:: reading, which blocks the > redirect that rewrites it for Samsung devices.
+taskkill /f /fi "WINDOWTITLE eq ImpactLED Cloud+ Desktop Player" /im cmd.exe >nul 2>&1
+taskkill /f /fi "WINDOWTITLE eq ImpactLED Cloud+ Desktop Player  [Samsung PrismView]" /im cmd.exe >nul 2>&1
 
 :: Wait until the process is fully gone -- taskkill returns before Windows
 :: releases file handles, so a fixed 3s sleep was not always enough.
@@ -170,11 +174,11 @@ if /i "%DEVICE_TYPE%"=="samsung" (
         echo :: Ensure System Matrix is running before the player starts
         echo :check_sm
         echo tasklist /fi "imagename eq System Matrix.exe" 2^>nul ^| find /i "System Matrix.exe" ^>nul
-        echo if %%errorlevel%% neq 0 (
+        echo if %%errorlevel%% neq 0 ^(
         echo     echo   [System Matrix] Not running -- starting...
         echo     start "" "%%SM_EXE%%"
         echo     timeout /t 5 /nobreak ^>nul
-        echo )
+        echo ^)
         echo.
         echo :loop
         echo cd /d "%INSTALL_DIR%"
@@ -185,11 +189,11 @@ if /i "%DEVICE_TYPE%"=="samsung" (
         echo.
         echo :: Re-check System Matrix on every restart
         echo tasklist /fi "imagename eq System Matrix.exe" 2^>nul ^| find /i "System Matrix.exe" ^>nul
-        echo if %%errorlevel%% neq 0 (
+        echo if %%errorlevel%% neq 0 ^(
         echo     echo   [System Matrix] Crashed -- restarting System Matrix...
         echo     start "" "%%SM_EXE%%"
         echo     timeout /t 5 /nobreak ^>nul
-        echo )
+        echo ^)
         echo goto loop
     ) > "%LAUNCHER%"
 )

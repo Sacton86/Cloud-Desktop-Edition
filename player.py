@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-VERSION = "1.0.22"
+VERSION = "1.0.23"
 
 def _runtime_version() -> str:
     """Return the installed release tag from version.txt if present, else VERSION."""
@@ -548,7 +548,7 @@ def _get_logo(height: int) -> Optional[pygame.Surface]:
         if PIL_AVAILABLE:
             try:
                 img = Image.open(str(_LOGO_PATH)).convert('RGBA')
-                raw = pygame.image.fromstring(img.tobytes(), img.size, 'RGBA')
+                raw = pygame.image.fromstring(img.tobytes(), img.size, 'RGBA').convert_alpha()
             except Exception:
                 pass
         if raw is None:
@@ -1788,7 +1788,7 @@ class ImageRenderer(BaseRenderer):
                     dur = frame.info.get('duration', 100)/1000.0 if n > 1 \
                           else self.item.duration/1000.0
                     f2  = frame.convert('RGBA').resize((w, h), Image.LANCZOS)
-                    s   = pygame.image.fromstring(f2.tobytes(), f2.size, 'RGBA')
+                    s   = pygame.image.fromstring(f2.tobytes(), f2.size, 'RGBA').convert_alpha()
                     self._frames.append(s)
                     self._durations.append(max(0.04, dur))
                 return
@@ -2429,7 +2429,7 @@ class WebRenderer(BaseRenderer):
                 if PIL_AVAILABLE:
                     from PIL import Image as _PIL
                     img = _PIL.open(tmp).convert('RGBA')
-                    s = pygame.image.fromstring(img.tobytes(), img.size, 'RGBA')
+                    s = pygame.image.fromstring(img.tobytes(), img.size, 'RGBA').convert_alpha()
                 else:
                     s = pygame.image.load(tmp).convert_alpha()
                 if s.get_size() != (self.srect.w, self.srect.h):
