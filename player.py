@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-VERSION = "1.0.23"
+VERSION = "1.0.24"
 
 def _runtime_version() -> str:
     """Return the installed release tag from version.txt if present, else VERSION."""
@@ -1723,9 +1723,11 @@ class BaseRenderer:
 
     def _fill_bg(self, surf):
         ob = self.item.opacity_bg
-        if ob <= 0:
-            return
         r, g, b, _ = self.item.back_clr
+        # CMS convention: black background == transparent (no fill).
+        # opacity_bg=0 is the explicit flag; black back_clr is the implicit one.
+        if ob <= 0 or (r == 0 and g == 0 and b == 0):
+            return
         if ob >= 1.0:
             pygame.draw.rect(surf, (r, g, b), self.srect)
         else:
@@ -1738,18 +1740,12 @@ class BaseRenderer:
         return (r, g, b)
 
     def _font_render(self, font, text, color):
-        """Render text with a background that composites correctly over _fill_bg.
-
-        When opacity_bg == 0 the region background is transparent, so we set a
-        colorkey on the returned surface so the black AA fringe doesn't show.
-        When opacity_bg > 0 we pass the actual back_clr to font.render so pygame
-        blends the AA edges against the real background colour instead of black.
-        """
-        if self.item.opacity_bg <= 0:
+        r, g, b, _ = self.item.back_clr
+        # Black background == transparent: use colorkey so AA edges don't halo.
+        if self.item.opacity_bg <= 0 or (r == 0 and g == 0 and b == 0):
             s = font.render(text, True, color)
             s.set_colorkey((0, 0, 0))
             return s
-        r, g, b, _ = self.item.back_clr
         return font.render(text, True, color, (r, g, b))
 
     def _render_centered(self, surf, text, color=(255,255,255)):
