@@ -33,7 +33,7 @@ Developed from scratch as `player.py` in `/home/sacton/Documents/Projects/APK TE
 
 ---
 
-## Working Features (as of v1.0.21)
+## Working Features (as of v1.0.24)
 
 - **CMS sync** — downloads and plays assigned programs automatically; picks up schedule changes within 30 s
 - **WebSocket online presence** — device shows as Online in CMS panel
@@ -54,10 +54,12 @@ Developed from scratch as `player.py` in `/home/sacton/Documents/Projects/APK TE
 - **WS reconnect backoff** — exponential backoff (5→10→20→30→60 s) on connection failure; backoff now correctly engages on DNS failure (previously reset to 5 s every attempt because `run_forever()` returned without raising). Max cap 60 s for reasonable modem recovery time.
 - **Connectivity gate (`_net_ok`)** — `_net_ok` event is set on WS `on_open` and cleared when WS enters backoff. CMS download loop skips `_sync()` while `_net_ok` is clear, eliminating the parallel HTTP error storm during cell modem outages. Resumes automatically on reconnect.
 - **Region layer ordering** — regions sorted descending by `Layer` value so CMS Layer=1 (foreground: text/weather/clock) renders on top of Layer=2 (background: video), matching Colorlight hardware behaviour.
-- **Text/font background rendering** — `BaseRenderer._font_render()` helper passes `back_clr` to pygame when `opacity_bg>0` (correct AA edge blending against background colour); uses `set_colorkey` when `opacity_bg=0` (transparent region over video). Fixes black-background halo and "background colour not displayed" reports on clock/text slides.
-- **Base64 PNG alpha compositing** — `_build_from_b64()` PIL path calls `.convert_alpha()` after `pygame.image.fromstring`. Without it, transparent pixels in CMS-pre-rendered text PNGs blit as opaque black, covering video regions behind text.
+- **Text/font background rendering** — `BaseRenderer._font_render()` uses `set_colorkey` when the background is transparent (`opacity_bg=0` or black `back_clr`), passes the real colour to `font.render` otherwise for correct AA edge blending.
+- **Base64 PNG alpha compositing** — all PIL `pygame.image.fromstring(..., 'RGBA')` calls chain `.convert_alpha()` so per-pixel alpha blits correctly. Affected paths: `_build_from_b64()`, `ImageRenderer._load()`, `WebRenderer`, `_get_logo()`.
 - **WeatherRenderer multi-line** — detects `type='5'` or `multiline=True` on the region and stacks all weather parts vertically (joined with `\n`) instead of forcing a single scrolling line. Single-line regions keep the existing paging/scrolling behaviour.
 - **updater.bat self-overwrite fix** — replaced `xcopy /EXCLUDE:file.txt` with `robocopy /XF updater.bat` (reliable filename exclusion, no intermediate file); background swap of `updater.bat.new` moved to after `pause` so CMD has exited before the file is replaced.
+- **updater.bat process-exit poll** — replaced fixed `timeout /t 3` with a `tasklist` poll loop; also kills the launcher `cmd.exe` by window title so `run_player.bat` is not held open during the Samsung launcher rewrite. `/IS /IT` flags added to robocopy so files copy even when timestamps match. Samsung launcher echo blocks escape `(` and `)` as `^(` / `^)` to prevent CMD block-parser misrouting the `>` redirect.
+- **Black background = transparent** — `_fill_bg` and `_font_render` both treat `back_clr=(0,0,0,...)` as transparent, matching the CMS convention where `BackColor=0xFF000000` means "no background / clear."
 
 ---
 
@@ -87,9 +89,13 @@ These are non-obvious invariants that have caused bugs before — check these fi
 - **WS routing**: Always use `author_url` to identify command type. Content-text scanning caused `isNewBrightness:1` to be misread as `brightness=1`, nearly blacking out the display.
 - **Screenshot endpoint**: `/wp-json/led/flowfee/v2/screenshot` — multipart POST with fields `image` (PNG file), `sn`, `time`.
 - **`_net_ok` flag**: `CMSClient._net_ok` is a `threading.Event` — set on WS `on_open`, cleared when `_ws_connect()` raises (DNS/connection failure). `_dl_loop` checks it before each `_sync()` call. Do not clear it on a normal WS drop (server-side close) — only on failure to connect at all. Starting state is set (assume connectivity).
-- **`_build_from_b64()` must call `.convert_alpha()`**: The PIL path creates a surface with `pygame.image.fromstring(..., 'RGBA')`. Without `.convert_alpha()` the surface blits without per-pixel alpha — transparent areas render opaque black. The non-PIL path (`pygame.image.load().convert_alpha()`) is correct; keep both paths consistent.
+- **All PIL `fromstring` paths must call `.convert_alpha()`**: Every `pygame.image.fromstring(..., 'RGBA')` call must chain `.convert_alpha()`. Without it the surface blits without per-pixel alpha and transparent areas render opaque black. Affected: `_build_from_b64()`, `ImageRenderer._load()`, `WebRenderer._fetch_thread()`, `_get_logo()`. The non-PIL `pygame.image.load().convert_alpha()` path is always correct — keep all paths consistent.
+- **Black `BackColor` = transparent (CMS convention)**: The CMS renders `BackColor=0xFF000000` (pure black) as clear/no-background. `_fill_bg` skips the fill when `back_clr` is `(0,0,0,...)` regardless of `opacity_bg`; `_font_render` uses the colorkey path in the same case. Never add a black region fill — it will cover video or other regions behind it.
 - **`WeatherRenderer` fake Item type**: Always check `self.item.type == '5' or self.item.multiline` before creating the internal `TextRenderer`. Multi-line regions need `fake = Item(type='5', ..., multiline=True, scroll=False)`; single-line regions use `type='4'` with scroll/paging. Hardcoding `type='4'` was a recurring bug.
 - **`updater.bat` — CMD reads by byte offset**: Overwriting a running `.bat` file causes CMD to jump to the wrong offset in the new file and re-execute earlier sections at random. `robocopy /XF updater.bat` excludes the running script during install; `xcopy /EXCLUDE:file.txt` silently failed on Samsung PrismView (the string-in-file matching did not apply). The background swap of `updater.bat.new` must be launched **after** `pause` — launching it before means schtasks/other commands can consume the delay and the swap fires while CMD is still running.
+- **`updater.bat` — taskkill returns before handles are released**: A fixed `timeout /t 3` was not always long enough. The stop section polls `tasklist` until the exe disappears then waits an extra 2 s. The launcher `cmd.exe` (window title `ImpactLED Cloud+ Desktop Player`) must also be killed or it holds `run_player.bat` open, blocking the Samsung launcher rewrite redirect.
+- **`updater.bat` — robocopy timestamp skipping**: `Expand-Archive` preserves ZIP timestamps, so reinstalling the same build produces identical source/dest timestamps and robocopy skips all files. `/IS /IT` flags force copy regardless.
+- **`updater.bat` — Samsung echo `(` / `)` must be escaped**: Bare `(` and `)` inside a `( ... ) > file` redirect block are counted by the CMD block parser, causing the redirect to be misapplied. Use `^(` and `^)` in all `echo` lines inside that block.
 - **Layer convention**: VSN Layer=1 is FOREGROUND (text, weather, clock), Layer=2 is BACKGROUND (video). Regions must be sorted `reverse=True` (descending layer number) so background renders first. This is the opposite of the intuitive reading.
 
 ---
@@ -190,6 +196,9 @@ Cloud+ Desktop Edition/
 | Base64 PNG alpha fix (`.convert_alpha()` in PIL path) | Done (v1.0.20) |
 | WeatherRenderer multi-line region support | Done (v1.0.20) |
 | updater.bat self-overwrite fix (`robocopy /XF`, post-pause swap) | Done (v1.0.21) |
+| updater.bat: process-exit poll, launcher kill, `/IS /IT`, `^(`/`^)` escaping | Done (v1.0.23) |
+| PNG/GIF/image transparency — `.convert_alpha()` on all PIL `fromstring` paths | Done (v1.0.23) |
+| Black `BackColor` = transparent — `_fill_bg` / `_font_render` CMS convention | Done (v1.0.24) |
 | Screenshot visible in CMS panel | Tabled |
 | Playlist history in CMS panel | Tabled |
 | Bulk deployment (env-var mode) | Planned |
