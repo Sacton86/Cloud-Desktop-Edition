@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-VERSION = "1.0.25"
+VERSION = "1.0.26"
 
 def _runtime_version() -> str:
     """Return the installed release tag from version.txt if present, else VERSION."""
@@ -2393,11 +2393,51 @@ class WebRenderer(BaseRenderer):
 
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
-        self._surf = None
-        self._lock = threading.Lock()
-        self._chrome = self._find_chrome()
-        if self._chrome:
+        self._surf       = None
+        self._lock       = threading.Lock()
+        self._war_server = None
+        self._war_tmpdir = None
+        self._serve_url  = self._prepare_url()
+        self._chrome     = self._find_chrome()
+        if self._chrome and self._serve_url:
             threading.Thread(target=self._loop, daemon=True).start()
+
+    def _prepare_url(self):
+        """Return URL to render. WAR items are extracted and served from localhost."""
+        import zipfile, http.server, socketserver, functools, tempfile as _tmp
+        if self.item.filesrc.path.lower().endswith('.war'):
+            war_path = resolve_path(self.item.filesrc, self.vsn_dir, self.vsn_stem)
+            if war_path and os.path.isfile(war_path):
+                try:
+                    tmpdir = _tmp.mkdtemp(prefix='impactled_war_')
+                    with zipfile.ZipFile(war_path, 'r') as z:
+                        z.extractall(tmpdir)
+                    entry = next(
+                        (c for c in ('index.html', 'index.htm', 'default.html')
+                         if os.path.isfile(os.path.join(tmpdir, c))),
+                        None
+                    )
+                    if not entry:
+                        shutil.rmtree(tmpdir, ignore_errors=True)
+                        print(f'[WebRenderer] WAR has no index.html: {war_path}')
+                        return None
+                    handler = functools.partial(
+                        http.server.SimpleHTTPRequestHandler, directory=tmpdir)
+                    srv = socketserver.TCPServer(('127.0.0.1', 0), handler)
+                    port = srv.server_address[1]
+                    threading.Thread(target=srv.serve_forever, daemon=True).start()
+                    self._war_server = srv
+                    self._war_tmpdir = tmpdir
+                    return f'http://127.0.0.1:{port}/{entry}'
+                except Exception as exc:
+                    print(f'[WebRenderer] WAR setup failed: {exc}')
+                    shutil.rmtree(self._war_tmpdir or '', ignore_errors=True)
+                    self._war_tmpdir = None
+                    return None
+        url = self.item.url or ''
+        if url and not url.startswith(('http://', 'https://')):
+            url = 'https://' + url
+        return url or None
 
     def _find_chrome(self):
         candidates = ['chromium-browser', 'chromium', 'google-chrome', 'google-chrome-stable']
@@ -2434,7 +2474,7 @@ class WebRenderer(BaseRenderer):
                 f'--screenshot={tmp}',
                 f'--window-size={self.srect.w},{self.srect.h}',
                 '--hide-scrollbars',
-                self.item.url,
+                self._serve_url,
             ]
             subprocess.run(args, capture_output=True, timeout=30)
             if os.path.exists(tmp) and os.path.getsize(tmp) > 0:
@@ -2464,7 +2504,15 @@ class WebRenderer(BaseRenderer):
         if s:
             surf.blit(s, self.srect.topleft)
         else:
-            self._render_centered(surf, self.item.url, (120, 140, 220))
+            self._render_centered(surf, self._serve_url or self.item.url, (120, 140, 220))
+
+    def destroy(self):
+        if self._war_server:
+            self._war_server.shutdown()
+            self._war_server = None
+        if self._war_tmpdir:
+            shutil.rmtree(self._war_tmpdir, ignore_errors=True)
+            self._war_tmpdir = None
 
 
 class PlaceholderRenderer(BaseRenderer):
