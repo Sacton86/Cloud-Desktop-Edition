@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-VERSION = "1.0.28"
+VERSION = "1.0.29"
 
 def _runtime_version() -> str:
     """Return the installed release tag from version.txt if present, else VERSION."""
@@ -494,14 +494,16 @@ def _page(e) -> Page:
     regions_el = _find_child(e, 'Regions')
     regions    = [_region(r) for r in regions_el.findall('Region')] \
                  if regions_el is not None else []
-    # PlayOneTime is absent in most VSN files; fall back to the longest item
-    # duration on the page so video/timer slides self-time correctly.
+    # PlayOneTime is absent in most VSN files.  Regions play in parallel, so
+    # each region's total display time = sum of its items' durations.  The page
+    # should last as long as the longest region (not just the longest single item).
     dur = xi(e, 'PlayOneTime', 0)
     if dur <= 0:
-        for reg in regions:
-            for it in reg.items:
-                if it.duration > dur:
-                    dur = it.duration
+        region_totals = [
+            sum(it.duration for it in reg.items)
+            for reg in regions if reg.items
+        ]
+        dur = max(region_totals) if region_totals else 0
     if dur <= 0:
         dur = 5000
     return Page(
@@ -2504,10 +2506,12 @@ class PageSlot:
                             self._vsn_dir, self._vsn_stem)
                 for r in sorted(self._page.regions, key=lambda rr: rr.layer, reverse=True)
             ]
-            # Override page duration with actual video file length when available.
+            # Override page and item durations with actual video file length when
+            # available so _advance() holds each video for its real runtime.
             for rs in self._states:
-                for rend in rs._rends:
+                for i, rend in enumerate(rs._rends):
                     if isinstance(rend, VideoRenderer) and rend._duration_ms > 0:
+                        rs.region.items[i].duration = rend._duration_ms
                         self._page.duration = max(self._page.duration, rend._duration_ms)
         return self._states
 
