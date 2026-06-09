@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-VERSION = "1.0.26"
+VERSION = "1.0.27"
 
 def _runtime_version() -> str:
     """Return the installed release tag from version.txt if present, else VERSION."""
@@ -292,6 +292,7 @@ class Item:
     multiline:   bool  = False
     move_type:   int   = 0
     analog:      bool  = False
+    clock_flags: int   = 0
     tz_off:      float = 0.0
     count_down:  bool  = True
     end_dt:      Optional[datetime.datetime] = None
@@ -438,8 +439,9 @@ def _item(e) -> Item:
         center     = (xi(e, 'centeralAlign', 0) or xi(e, 'CenteralAlign', 0)) == 1,
         multiline  = xi(e, 'IsMultiLine', 0) == 1,
         move_type  = xi(e, 'MoveType', 0),
-        analog     = xi(e, 'IsAnolog', 0) == 1,
-        tz_off     = xf(e, 'TimeZone', 0.0),
+        analog      = xi(e, 'IsAnolog', 0) == 1,
+        clock_flags = xi(_find_child(e, 'DigtalClock'), 'Flags', 0) if _find_child(e, 'DigtalClock') is not None else 0,
+        tz_off      = xf(e, 'TimeZone', 0.0),
         count_down = xi(e, 'BeToEndTime', 0) != 0,
         end_dt     = _parse_datetime(xt(e, 'EndDateTime', '')),
         prefix     = xt(e, 'Prefix', ''),
@@ -2152,7 +2154,7 @@ class ClockRenderer(BaseRenderer):
         if fixed:
             lines.append(fixed)
         lines.append(now.strftime('%H:%M:%S'))
-        if self.item.multiline:
+        if self.item.clock_flags & 0x2000:
             lines += [now.strftime('%Y-%m-%d'), now.strftime('%A')]
         total = fh * len(lines)
         y0    = sr.y + (sr.h - total) // 2
@@ -2393,13 +2395,16 @@ class WebRenderer(BaseRenderer):
 
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
-        self._surf       = None
-        self._lock       = threading.Lock()
-        self._war_server = None
-        self._war_tmpdir = None
-        self._serve_url  = self._prepare_url()
-        self._chrome     = self._find_chrome()
+        self._surf         = None
+        self._lock         = threading.Lock()
+        self._war_server   = None
+        self._war_tmpdir   = None
+        self._chrome_prof  = None
+        self._serve_url    = self._prepare_url()
+        self._chrome       = self._find_chrome()
         if self._chrome and self._serve_url:
+            import tempfile as _tmp2
+            self._chrome_prof = _tmp2.mkdtemp(prefix='impactled_chrome_')
             threading.Thread(target=self._loop, daemon=True).start()
 
     def _prepare_url(self):
@@ -2470,10 +2475,11 @@ class WebRenderer(BaseRenderer):
                 tmp = f.name
             args = [
                 self._chrome,
-                '--headless', '--disable-gpu', '--no-sandbox',
+                '--headless=new', '--disable-gpu', '--no-sandbox',
                 f'--screenshot={tmp}',
                 f'--window-size={self.srect.w},{self.srect.h}',
                 '--hide-scrollbars',
+                f'--user-data-dir={self._chrome_prof}',
                 self._serve_url,
             ]
             subprocess.run(args, capture_output=True, timeout=30)
@@ -2513,6 +2519,9 @@ class WebRenderer(BaseRenderer):
         if self._war_tmpdir:
             shutil.rmtree(self._war_tmpdir, ignore_errors=True)
             self._war_tmpdir = None
+        if self._chrome_prof:
+            shutil.rmtree(self._chrome_prof, ignore_errors=True)
+            self._chrome_prof = None
 
 
 class PlaceholderRenderer(BaseRenderer):
