@@ -241,5 +241,14 @@ Cloud-Desktop-Edition/
 | FPS counter (F12 toggle, bottom-right corner) | Done |
 | Console log output restored | Done |
 | Cell modem connectivity resilience (WS backoff + CMS sync gate) | Done |
+| Region layer ordering — video behind text/weather/clock | Done |
+| Text/font background rendering — correct AA blending | Done |
+| Image/GIF transparency — `.convert_alpha()` on all PIL paths | Done |
+| WeatherRenderer multi-line region support | Done |
+| updater.bat reliability — process-exit poll, launcher kill, timestamp fix | Done |
+| Black `BackColor` = transparent — matches CMS rendering convention | Done |
+| Clock single-line vs multi-line mode (`DigtalClock/Flags`) | Done |
+| Countdown timer fix — inverted `BeToEndTime` flag corrected | Done |
+| Playlist rotation fix — page duration uses sum per region, not max item | Done |
 | Screenshot visible in CMS panel | Tabled |
 | Playlist history in CMS panel | Tabled |
