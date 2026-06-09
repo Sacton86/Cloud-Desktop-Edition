@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-VERSION = "1.0.29"
+VERSION = "1.0.30"
 
 def _runtime_version() -> str:
     """Return the installed release tag from version.txt if present, else VERSION."""
@@ -979,6 +979,7 @@ class CMSClient:
                             'content': 'heartbeat',
                         }))
                     except Exception:
+                        ws.close()
                         break
             threading.Thread(target=_heartbeat, daemon=True).start()
 
@@ -1015,7 +1016,7 @@ class CMSClient:
             on_message=on_message,
             on_close=on_close,
             on_error=on_error,
-        ).run_forever(sslopt=_sslopt)
+        ).run_forever(sslopt=_sslopt, ping_interval=20, ping_timeout=10)
 
         if not _connected.is_set():
             raise ConnectionError(f'could not connect to {host}:8443')
