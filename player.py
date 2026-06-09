@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-VERSION = "1.0.27"
+VERSION = "1.0.28"
 
 def _runtime_version() -> str:
     """Return the installed release tag from version.txt if present, else VERSION."""
@@ -2391,137 +2391,11 @@ class SyncRenderer(BaseRenderer):
         self._render_centered(surf, '⟳ Sync Play', (100,200,100))
 
 class WebRenderer(BaseRenderer):
-    _REFRESH = 30.0
-
-    def __init__(self, *a, **kw):
-        super().__init__(*a, **kw)
-        self._surf         = None
-        self._lock         = threading.Lock()
-        self._war_server   = None
-        self._war_tmpdir   = None
-        self._chrome_prof  = None
-        self._serve_url    = self._prepare_url()
-        self._chrome       = self._find_chrome()
-        if self._chrome and self._serve_url:
-            import tempfile as _tmp2
-            self._chrome_prof = _tmp2.mkdtemp(prefix='impactled_chrome_')
-            threading.Thread(target=self._loop, daemon=True).start()
-
-    def _prepare_url(self):
-        """Return URL to render. WAR items are extracted and served from localhost."""
-        import zipfile, http.server, socketserver, functools, tempfile as _tmp
-        if self.item.filesrc.path.lower().endswith('.war'):
-            war_path = resolve_path(self.item.filesrc, self.vsn_dir, self.vsn_stem)
-            if war_path and os.path.isfile(war_path):
-                try:
-                    tmpdir = _tmp.mkdtemp(prefix='impactled_war_')
-                    with zipfile.ZipFile(war_path, 'r') as z:
-                        z.extractall(tmpdir)
-                    entry = next(
-                        (c for c in ('index.html', 'index.htm', 'default.html')
-                         if os.path.isfile(os.path.join(tmpdir, c))),
-                        None
-                    )
-                    if not entry:
-                        shutil.rmtree(tmpdir, ignore_errors=True)
-                        print(f'[WebRenderer] WAR has no index.html: {war_path}')
-                        return None
-                    handler = functools.partial(
-                        http.server.SimpleHTTPRequestHandler, directory=tmpdir)
-                    srv = socketserver.TCPServer(('127.0.0.1', 0), handler)
-                    port = srv.server_address[1]
-                    threading.Thread(target=srv.serve_forever, daemon=True).start()
-                    self._war_server = srv
-                    self._war_tmpdir = tmpdir
-                    return f'http://127.0.0.1:{port}/{entry}'
-                except Exception as exc:
-                    print(f'[WebRenderer] WAR setup failed: {exc}')
-                    shutil.rmtree(self._war_tmpdir or '', ignore_errors=True)
-                    self._war_tmpdir = None
-                    return None
-        url = self.item.url or ''
-        if url and not url.startswith(('http://', 'https://')):
-            url = 'https://' + url
-        return url or None
-
-    def _find_chrome(self):
-        candidates = ['chromium-browser', 'chromium', 'google-chrome', 'google-chrome-stable']
-        if sys.platform == 'win32':
-            win_paths = [
-                r'C:\Program Files\Google\Chrome\Application\chrome.exe',
-                r'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe',
-                r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',
-                r'C:\Program Files\Microsoft\Edge\Application\msedge.exe',
-            ]
-            candidates = ['chrome', 'msedge'] + [p for p in win_paths if os.path.isfile(p)] + candidates
-        for cmd in candidates:
-            try:
-                subprocess.run([cmd, '--version'], capture_output=True, timeout=5)
-                return cmd
-            except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-                continue
-        return None
-
-    def _loop(self):
-        while True:
-            self._take_screenshot()
-            time.sleep(self._REFRESH)
-
-    def _take_screenshot(self):
-        import tempfile
-        tmp = None
-        try:
-            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as f:
-                tmp = f.name
-            args = [
-                self._chrome,
-                '--headless=new', '--disable-gpu', '--no-sandbox',
-                f'--screenshot={tmp}',
-                f'--window-size={self.srect.w},{self.srect.h}',
-                '--hide-scrollbars',
-                f'--user-data-dir={self._chrome_prof}',
-                self._serve_url,
-            ]
-            subprocess.run(args, capture_output=True, timeout=30)
-            if os.path.exists(tmp) and os.path.getsize(tmp) > 0:
-                if PIL_AVAILABLE:
-                    from PIL import Image as _PIL
-                    img = _PIL.open(tmp).convert('RGBA')
-                    s = pygame.image.fromstring(img.tobytes(), img.size, 'RGBA').convert_alpha()
-                else:
-                    s = pygame.image.load(tmp).convert_alpha()
-                if s.get_size() != (self.srect.w, self.srect.h):
-                    s = pygame.transform.scale(s, (self.srect.w, self.srect.h))
-                with self._lock:
-                    self._surf = s
-        except Exception as exc:
-            print(f'[WebRenderer] {exc}')
-        finally:
-            if tmp:
-                try:
-                    os.unlink(tmp)
-                except Exception:
-                    pass
-
     def render(self, surf):
         self._fill_bg(surf)
-        with self._lock:
-            s = self._surf
-        if s:
-            surf.blit(s, self.srect.topleft)
-        else:
-            self._render_centered(surf, self._serve_url or self.item.url, (120, 140, 220))
-
-    def destroy(self):
-        if self._war_server:
-            self._war_server.shutdown()
-            self._war_server = None
-        if self._war_tmpdir:
-            shutil.rmtree(self._war_tmpdir, ignore_errors=True)
-            self._war_tmpdir = None
-        if self._chrome_prof:
-            shutil.rmtree(self._chrome_prof, ignore_errors=True)
-            self._chrome_prof = None
+        label = self.item.url or os.path.basename(
+            self.item.filesrc.path.replace('\\', '/')) or '[Web]'
+        self._render_centered(surf, label, (120, 140, 220))
 
 
 class PlaceholderRenderer(BaseRenderer):
