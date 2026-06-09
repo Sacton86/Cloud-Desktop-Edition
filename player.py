@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-VERSION = "1.0.24"
+VERSION = "1.0.25"
 
 def _runtime_version() -> str:
     """Return the installed release tag from version.txt if present, else VERSION."""
@@ -348,7 +348,12 @@ class Program:
 def _parse_datetime(s: str) -> Optional[datetime.datetime]:
     if not s:
         return None
-    m = re.match(r'(\d+)-(\d+)-(\d+)\s+(\d+):(\d+):(\d+)', s.strip())
+    s = s.strip()
+    try:
+        return datetime.datetime.fromtimestamp(int(s))
+    except (ValueError, OSError):
+        pass
+    m = re.match(r'(\d+)-(\d+)-(\d+)[T ](\d+):(\d+):(\d+)', s)
     if m:
         try:
             return datetime.datetime(*[int(x) for x in m.groups()])
@@ -435,7 +440,7 @@ def _item(e) -> Item:
         move_type  = xi(e, 'MoveType', 0),
         analog     = xi(e, 'IsAnolog', 0) == 1,
         tz_off     = xf(e, 'TimeZone', 0.0),
-        count_down = xi(e, 'BeToEndTime', 0) == 0,
+        count_down = xi(e, 'BeToEndTime', 0) != 0,
         end_dt     = _parse_datetime(xt(e, 'EndDateTime', '')),
         prefix     = xt(e, 'Prefix', ''),
         show_d     = xi(e, 'IsShowDayCount', 1) == 1,
@@ -2146,7 +2151,9 @@ class ClockRenderer(BaseRenderer):
         fixed = self.item.text or self.item.prefix
         if fixed:
             lines.append(fixed)
-        lines += [now.strftime('%H:%M:%S'), now.strftime('%Y-%m-%d'), now.strftime('%A')]
+        lines.append(now.strftime('%H:%M:%S'))
+        if self.item.multiline:
+            lines += [now.strftime('%Y-%m-%d'), now.strftime('%A')]
         total = fh * len(lines)
         y0    = sr.y + (sr.h - total) // 2
         for i, line in enumerate(lines):
@@ -2393,7 +2400,16 @@ class WebRenderer(BaseRenderer):
             threading.Thread(target=self._loop, daemon=True).start()
 
     def _find_chrome(self):
-        for cmd in ('chromium-browser', 'chromium', 'google-chrome', 'google-chrome-stable'):
+        candidates = ['chromium-browser', 'chromium', 'google-chrome', 'google-chrome-stable']
+        if sys.platform == 'win32':
+            win_paths = [
+                r'C:\Program Files\Google\Chrome\Application\chrome.exe',
+                r'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe',
+                r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',
+                r'C:\Program Files\Microsoft\Edge\Application\msedge.exe',
+            ]
+            candidates = ['chrome', 'msedge'] + [p for p in win_paths if os.path.isfile(p)] + candidates
+        for cmd in candidates:
             try:
                 subprocess.run([cmd, '--version'], capture_output=True, timeout=5)
                 return cmd
