@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-VERSION = "1.0.30"
+VERSION = "1.0.31"
 
 def _runtime_version() -> str:
     """Return the installed release tag from version.txt if present, else VERSION."""
@@ -1590,6 +1590,20 @@ class CMSClient:
 
         vsn_entries   = [m for m in media if m.get('source_url', '').lower().endswith('.vsn')]
         other_entries = [m for m in media if not m.get('source_url', '').lower().endswith('.vsn')]
+
+        # Deduplicate VSN entries by normalized filename — if a program has two .vsn
+        # attachments that strip to the same name (e.g. a re-upload that left the old
+        # attachment in place), keep only the first (newest, WordPress returns newest-first).
+        # Without this, the player oscillates between the two URLs every sync cycle,
+        # triggering a stale-media clear and full re-download on every pass.
+        _seen_vsn: set = set()
+        _deduped: list = []
+        for _e in vsn_entries:
+            _norm = _strip_cms_suffix(os.path.basename(_e.get('source_url', '')))
+            if _norm not in _seen_vsn:
+                _seen_vsn.add(_norm)
+                _deduped.append(_e)
+        vsn_entries = _deduped
 
         vsn_path      = None
         changed       = False
