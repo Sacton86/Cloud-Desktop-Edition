@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-VERSION = "1.0.31"
+VERSION = "1.0.32"
 
 def _runtime_version() -> str:
     """Return the installed release tag from version.txt if present, else VERSION."""
@@ -268,6 +268,27 @@ class Rect:
     border_clr: Tuple = (255, 255, 0, 255)
 
 @dataclass
+class ItemSchedule:
+    """Colorlight VSN Schedule block (spec 1.56.7+).
+
+    All three limit flags are independent; when a flag is 0 that constraint
+    is skipped.  Time range wraps midnight if start_time > end_time.
+    Day-of-week mask indexes 0-6 = Monday..Sunday (Colorlight Cloud SDK V1.2:
+    "List From Monday to Sunday" — verified across commandSchedule /
+    contentsSchedule / Java SDK weeks param / raw /api/lanschedule JSON).
+    """
+    limit_time:  bool = False
+    start_time:  Optional[datetime.time] = None
+    end_time:    Optional[datetime.time] = None
+    limit_date:  bool = False
+    start_day:   Optional[datetime.date] = None
+    start_day_t: Optional[datetime.time] = None
+    end_day:     Optional[datetime.date] = None
+    end_day_t:   Optional[datetime.time] = None
+    limit_week:  bool = False
+    week_mask:   Tuple[int, ...] = ()
+
+@dataclass
 class Item:
     type:        str   = '0'
     name:        str   = ''
@@ -316,6 +337,7 @@ class Item:
     suffix:  str = ''
     url:     str = ''
     base64_pages: List[str] = field(default_factory=list)
+    sched:   Optional[ItemSchedule] = None
 
 @dataclass
 class Region:
@@ -324,6 +346,7 @@ class Region:
     layer: int    = 1
     rect:  Rect   = field(default_factory=Rect)
     items: List[Item] = field(default_factory=list)
+    is_schedule_region: bool = False
 
 @dataclass
 class Page:
@@ -392,6 +415,98 @@ def _fx(e, tag: str) -> FxEntry:
         ms    = xi(el, 'Time', 500),
         is_tr = xi(el, 'IsTran', 0) == 1,
     )
+
+def _parse_time(s: str) -> Optional[datetime.time]:
+    if not s:
+        return None
+    m = re.match(r'(\d+):(\d+)(?::(\d+))?', s.strip())
+    if not m:
+        return None
+    try:
+        return datetime.time(int(m.group(1)), int(m.group(2)),
+                             int(m.group(3) or 0))
+    except ValueError:
+        return None
+
+def _parse_date(s: str) -> Optional[datetime.date]:
+    if not s:
+        return None
+    m = re.match(r'(\d+)[/\-](\d+)[/\-](\d+)', s.strip())
+    if not m:
+        return None
+    try:
+        return datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    except ValueError:
+        return None
+
+def _schedule(e) -> Optional[ItemSchedule]:
+    sc = _find_child(e, 'Schedule')
+    if sc is None:
+        return None
+    mask_str = xt(sc, 'LimitWeek', '')
+    mask: Tuple[int, ...] = ()
+    if mask_str:
+        try:
+            mask = tuple(int(x.strip()) for x in mask_str.split(',') if x.strip())
+        except ValueError:
+            mask = ()
+    return ItemSchedule(
+        limit_time  = xi(sc, 'IsLimitTime', 0) == 1,
+        start_time  = _parse_time(xt(sc, 'StartTime', '')),
+        end_time    = _parse_time(xt(sc, 'EndTime',   '')),
+        limit_date  = xi(sc, 'IsLimitDate', 0) == 1,
+        start_day   = _parse_date(xt(sc, 'StartDay',     '')),
+        start_day_t = _parse_time(xt(sc, 'StartDayTime', '')),
+        end_day     = _parse_date(xt(sc, 'EndDay',       '')),
+        end_day_t   = _parse_time(xt(sc, 'EndDayTime',   '')),
+        limit_week  = xi(sc, 'IsLimitWeek', 0) == 1,
+        week_mask   = mask,
+    )
+
+def schedule_active(sched: Optional[ItemSchedule],
+                    now: Optional[datetime.datetime] = None) -> bool:
+    """True when a schedule permits playback at `now` (default: system now).
+
+    Semantics per Colorlight LANplayer SDK 1.56.7:
+      • IsLimitDate — item plays only within the [StartDay, EndDay] window,
+        respecting StartDayTime / EndDayTime on the boundary days.
+      • IsLimitTime — daily time-of-day window; start > end wraps midnight.
+      • IsLimitWeek — LimitWeek mask "m,t,w,t,f,s,s" indexed Monday..Sunday
+        (Colorlight Cloud SDK V1.2 verbatim: "List From Monday to Sunday").
+    A None schedule (no <Schedule> block) is always active.
+    """
+    if sched is None:
+        return True
+    now = now or datetime.datetime.now()
+    d, t = now.date(), now.time()
+
+    if sched.limit_date:
+        sd, ed = sched.start_day, sched.end_day
+        if sd and d < sd:
+            return False
+        if ed and d > ed:
+            return False
+        if sd and d == sd and sched.start_day_t and t < sched.start_day_t:
+            return False
+        if ed and d == ed and sched.end_day_t and t > sched.end_day_t:
+            return False
+
+    if sched.limit_time and sched.start_time and sched.end_time:
+        if sched.start_time <= sched.end_time:
+            if not (sched.start_time <= t <= sched.end_time):
+                return False
+        else:
+            # Range wraps midnight (e.g. 22:00-02:00).
+            if not (t >= sched.start_time or t <= sched.end_time):
+                return False
+
+    if sched.limit_week and sched.week_mask:
+        # Python weekday(): Mon=0..Sun=6 — matches Colorlight Monday-first mask.
+        dow = now.weekday()
+        if dow >= len(sched.week_mask) or not sched.week_mask[dow]:
+            return False
+
+    return True
 
 def _item(e) -> Item:
     raw_text = xt(e, 'Text', '').replace('&#xA;', '\n').replace('&#xa;', '\n')
@@ -468,6 +583,7 @@ def _item(e) -> Item:
         suffix       = xt(e, 'suffix',  ''),
         url          = xt(e, 'Url',     ''),
         base64_pages = _b64_pages,
+        sched        = _schedule(e),
     )
 
 def _region(e) -> Region:
@@ -488,6 +604,7 @@ def _region(e) -> Region:
         layer = xi(e, 'Layer', 1),
         rect  = rect,
         items = items,
+        is_schedule_region = xi(e, 'IsScheduleRegion', 0) == 1,
     )
 
 def _page(e) -> Page:
@@ -907,6 +1024,16 @@ class CMSClient:
         self._screenshot_png: Optional[bytes] = None # latest PNG bytes
         self._screenshot_lock  = threading.Lock()
 
+        # Serialize CMS syncs across the periodic download loop and any
+        # WS-triggered sync so two syncs can never race and clobber each other's
+        # _seen bookkeeping or download temp files.  Non-blocking acquire in
+        # the WS path so a slow poll doesn't block WS ping/pong.
+        self._sync_lock = threading.Lock()
+
+        # Program IDs we've already warned about being unsupported bucket/barrel
+        # programs — prevents the log from flooding on every 30s poll.
+        self._bucket_warned: set = set()
+
         threading.Thread(target=self._ws_loop,     daemon=True).start()
         threading.Thread(target=self._status_loop,  daemon=True).start()
         threading.Thread(target=self._dl_loop,      daemon=True).start()
@@ -1093,19 +1220,36 @@ class CMSClient:
             self._ws_sync()
 
     def _ws_sync(self):
-        """Trigger a debounced program sync from a WebSocket command."""
+        """Trigger a debounced program sync from a WebSocket command.
+
+        Runs on a background thread so WebSocketApp.run_forever's single
+        callback thread can return immediately and keep servicing ping/pong.
+        Blocking the WS thread on an HTTP sync caused Colorlight to see the
+        device drop offline for the duration of the download.
+        """
         now = time.monotonic()
         if now - self._last_force_t < 30.0:
             return
         self._last_force_t = now
-        print('[Cloud+ WS] Syncing programs…')
-        self._force_queue = True
+        threading.Thread(target=self._ws_sync_worker, daemon=True).start()
+
+    def _ws_sync_worker(self):
+        # Try to acquire non-blocking; if the periodic sync is already running,
+        # its work covers this trigger and we skip to avoid piling up.
+        if not self._sync_lock.acquire(blocking=False):
+            print('[Cloud+ WS] Skip sync — periodic sync already running')
+            return
         try:
-            self._sync()
-        except Exception as exc:
-            print(f'[Cloud+ WS] sync error: {exc}')
+            print('[Cloud+ WS] Syncing programs…')
+            self._force_queue = True
+            try:
+                self._sync()
+            except Exception as exc:
+                print(f'[Cloud+ WS] sync error: {exc}')
+            finally:
+                self._force_queue = False
         finally:
-            self._force_queue = False
+            self._sync_lock.release()
 
     def deliver_screenshot(self, png_bytes: bytes):
         """Called from main thread after capturing the pygame screen."""
@@ -1498,13 +1642,18 @@ class CMSClient:
 
         while not self._stop.is_set():
             if self._net_ok.is_set():
-                try:
-                    self._sync()
-                except Exception as exc:
-                    self.last_err = str(exc)
-                    if self.status != 'online':
-                        self.status = 'error'
-                    print(f'[Cloud+] {exc}')
+                # Non-blocking: if a WS-triggered sync is currently running,
+                # this tick is redundant — skip and try again next interval.
+                if self._sync_lock.acquire(blocking=False):
+                    try:
+                        self._sync()
+                    except Exception as exc:
+                        self.last_err = str(exc)
+                        if self.status != 'online':
+                            self.status = 'error'
+                        print(f'[Cloud+] {exc}')
+                    finally:
+                        self._sync_lock.release()
             self._stop.wait(timeout=max(15, self.cfg.cms_interval))
 
     def _auth(self) -> dict:
@@ -1551,15 +1700,43 @@ class CMSClient:
         # Collect vsn paths from all programs; only queue the final winner
         # after all HTTP calls complete so the main loop never sees a partial
         # sync (which caused a flash of the older playlist on startup).
+        #
+        # Retry each program's handle up to 3x before giving up so a flaky HTTP
+        # call on the newest program doesn't silently make an older program win
+        # (previous behavior — caused persistent stale playlists in the field).
+        # If the newest program still fails after retries, log LOUDLY so the
+        # fallback to an older program is visible in the terminal log.
         final_vsn:     Optional[Path] = None
         final_fetched: bool           = False
-        for prog in programs:
-            try:
-                result = self._handle_program(server, prog)
-                if result is not None:
-                    final_vsn, final_fetched = result   # sorted oldest-first, newest wins
-            except Exception as exc:
-                print(f'[Cloud+] program skip: {exc}')
+        newest_failed = False
+        for idx, prog in enumerate(programs):
+            is_newest = (idx == len(programs) - 1)
+            result = None
+            last_exc = None
+            for attempt in range(3):
+                try:
+                    result = self._handle_program(server, prog)
+                    last_exc = None
+                    break
+                except Exception as exc:
+                    last_exc = exc
+                    if attempt < 2:
+                        time.sleep(1.5 * (attempt + 1))
+            if last_exc is not None:
+                pid = prog.get('id', '?')
+                if is_newest:
+                    newest_failed = True
+                    print(f'[Cloud+] !! NEWEST program id={pid} FAILED after retries: '
+                          f'{last_exc} — falling back to an older program if available')
+                else:
+                    print(f'[Cloud+] program id={pid} skip after retries: {last_exc}')
+                continue
+            if result is not None:
+                final_vsn, final_fetched = result   # sorted oldest-first, newest wins
+
+        if newest_failed and final_vsn is not None:
+            print(f'[Cloud+] !! Serving STALE program {final_vsn.name} '
+                  f'because newest program sync failed')
 
         if final_vsn is not None:
             try:
@@ -1571,6 +1748,23 @@ class CMSClient:
             self.status = 'ok'
 
     def _handle_program(self, server: str, prog: dict) -> Optional[Path]:
+        # Bucket / barrel programs are wrapper programs that contain multiple
+        # sub-playlists with an internal schedule — the schema isn't documented
+        # in Colorlight Cloud SDK V1.2, so we can't render them yet.  Log ONCE
+        # per program id so the field can spot "sign blank because it's a bucket
+        # program" without needing to grep 60 lines of poll spam.  Customers
+        # who need scheduled-playlist rotation can achieve the same result with
+        # regular programs + CMS-level scheduling, which already works.
+        if prog.get('mime_type') == 'bucket':
+            pid = prog.get('id', '?')
+            if pid not in self._bucket_warned:
+                self._bucket_warned.add(pid)
+                pname = prog.get('title', {}).get('rendered', '') or f'id={pid}'
+                print(f'[Cloud+] Bucket program "{pname}" ignored — '
+                      f'bucket programs not yet supported. Use regular programs '
+                      f'with CMS-level scheduling for rotating playlists.')
+            return
+
         # Locate the media-attachment href from the program's links
         links = prog.get('_links', {})
         href  = None
@@ -1634,14 +1828,15 @@ class CMSClient:
                           not (existing_sz > 0 and (size == 0 or existing_sz == size))
 
             if needs_dl:
-                # URL or size changed — wipe stale media and fetch fresh copy.
-                old_files_dir = self.dl_dir / (dest.stem + '.files')
-                if old_files_dir.is_dir():
-                    shutil.rmtree(old_files_dir, ignore_errors=True)
-                    print(f'[Cloud+] Cleared stale media: {old_files_dir.name}')
-                stale_keys = [k for k in self._seen if k.startswith(dest.stem + '/')]
-                for k in stale_keys:
-                    del self._seen[k]
+                # Log the decision so we can tell in the field whether repeat
+                # downloads are caused by real content changes or a size/URL glitch.
+                print(f'[Cloud+] needs_dl {name}: url_changed={url_changed} '
+                      f'cms_size={size} disk_size={existing_sz} url={url}')
+                # Fetch fresh copy.  Do NOT blanket-wipe the .files/ folder or
+                # purge every child key: the per-media loop below already checks
+                # each file's disk state and refetches only what changed.  A full
+                # wipe on every VSN edit forced re-download of every video and
+                # image after a trivial CMS change, burning cell data.
                 print(f'[Cloud+] ↓ {name}')
                 self._dl(url, dest, size)
                 vsn_fetched = True
@@ -1718,14 +1913,18 @@ class CMSClient:
         # Exact size match → already complete, skip (bypass when forced)
         if not force and existing > 0 and expected > 0 and existing == expected:
             return
-        # Wrong size, outdated, or forced refresh → start fresh.
-        if dest.exists():
-            dest.unlink()
+        # Download to a sibling temp file, then atomically replace the target so
+        # a currently-open handle (video playback) never sees a truncated or
+        # missing file.  os.replace() succeeds even when dest is held on POSIX;
+        # on Windows the temp lives alongside dest and the swap is a single
+        # rename call — no unlink-then-write race window.
+        tmp = dest.with_suffix(dest.suffix + '.part')
         r = requests.get(url, headers=self._auth(), timeout=60, stream=True)
         r.raise_for_status()
-        with open(dest, 'wb') as fh:
+        with open(tmp, 'wb') as fh:
             for chunk in r.iter_content(65536):
                 fh.write(chunk)
+        os.replace(tmp, dest)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2170,9 +2369,53 @@ class ClockRenderer(BaseRenderer):
         fixed = self.item.text or self.item.prefix
         if fixed:
             lines.append(fixed)
-        lines.append(now.strftime('%H:%M:%S'))
-        if self.item.clock_flags & 0x2000:
-            lines += [now.strftime('%Y-%m-%d'), now.strftime('%A')]
+
+        # Colorlight DigtalClock.Flags bit map (from LANplayerSDK 1.25 spec):
+        #   1=Year 2=Month 4=Day 8=Hour 16=Minute 32=Second 512=DayOfWeek
+        #   1024=AM/PM 2048=24-hour 4096=2-digit-year 8192=multi-line
+        # flags == 0 means "display fixed text" per spec; keep the old default
+        # (24h H:M:S) so legacy VSN files without proper flags still show a clock.
+        flags = self.item.clock_flags
+        if flags == 0:
+            lines.append(now.strftime('%H:%M:%S'))
+        else:
+            show_hour  = bool(flags & 8)
+            show_min   = bool(flags & 16)
+            show_sec   = bool(flags & 32)
+            is_24h     = bool(flags & 2048)
+            show_ampm  = bool(flags & 1024) and not is_24h
+            show_year  = bool(flags & 1)
+            show_month = bool(flags & 2)
+            show_day   = bool(flags & 4)
+            two_dig_y  = bool(flags & 4096)
+            show_dow   = bool(flags & 512)
+
+            time_parts = []
+            if show_hour:
+                time_parts.append('%H' if is_24h else '%I')
+            if show_min:
+                time_parts.append('%M')
+            if show_sec:
+                time_parts.append('%S')
+            time_fmt = ':'.join(time_parts)
+            if show_ampm:
+                time_fmt = (time_fmt + ' %p') if time_fmt else '%p'
+            if time_fmt:
+                lines.append(now.strftime(time_fmt))
+
+            if show_year or show_month or show_day:
+                date_parts = []
+                if show_year:
+                    date_parts.append('%y' if two_dig_y else '%Y')
+                if show_month:
+                    date_parts.append('%m')
+                if show_day:
+                    date_parts.append('%d')
+                lines.append(now.strftime('-'.join(date_parts)))
+
+            if show_dow:
+                lines.append(now.strftime('%A'))
+
         total = fh * len(lines)
         y0    = sr.y + (sr.h - total) // 2
         for i, line in enumerate(lines):
@@ -2476,20 +2719,67 @@ class RegionState:
         self._sx      = sx; self._sy = sy
         self._ox      = ox; self._oy = oy
         self._bw      = max(0, int(r.border_w * min(sx, sy)))
+        # Cache last active-set evaluation so we only re-scan schedules on
+        # cycle wrap or once a minute, not every frame.
+        self._sched_next_check = 0.0
+        self._sched_active_idx: List[int] = list(range(len(region.items)))
+
+    def _refresh_active(self):
+        """Rebuild the list of currently-schedulable item indices."""
+        if not self.region.is_schedule_region:
+            self._sched_active_idx = list(range(len(self.region.items)))
+            return
+        now_dt = datetime.datetime.now()
+        self._sched_active_idx = [
+            i for i, it in enumerate(self.region.items)
+            if schedule_active(it.sched, now_dt)
+        ]
 
     def _advance(self):
         if not self.region.items:
             return
-        now = time.monotonic()
-        if now - self._item_t >= self.region.items[self._idx].duration / 1000.0:
-            self._idx    = (self._idx + 1) % len(self.region.items)
-            self._item_t = now
+        # Re-evaluate the schedule window on a slow tick and on every wrap so
+        # items that just crossed their StartTime start playing without a reload.
+        mono = time.monotonic()
+        if mono >= self._sched_next_check:
+            self._refresh_active()
+            self._sched_next_check = mono + 30.0
+
+        if not self._sched_active_idx:
+            return
+
+        # Map the "position" into the active-index list.  _idx is a raw item
+        # index; find its ordinal position among currently-active items so
+        # advancing skips scheduled-off items.
+        try:
+            pos = self._sched_active_idx.index(self._idx)
+        except ValueError:
+            pos = 0
+            self._idx = self._sched_active_idx[0]
+            self._item_t = mono
+
+        cur_dur = self.region.items[self._idx].duration / 1000.0
+        if mono - self._item_t >= cur_dur:
+            pos = (pos + 1) % len(self._sched_active_idx)
+            new_idx = self._sched_active_idx[pos]
+            # A full wrap is the natural point to re-scan schedules so items
+            # whose window opened mid-cycle appear next round.
+            if pos == 0:
+                self._refresh_active()
+                if not self._sched_active_idx:
+                    return
+                new_idx = self._sched_active_idx[0]
+            self._idx    = new_idx
+            self._item_t = mono
 
     def render(self, surf: pygame.Surface):
         if not self.region.show or not self._rends:
             return
         self._advance()
-        self._rends[self._idx].render(surf)
+        if not self._sched_active_idx:
+            return
+        if 0 <= self._idx < len(self._rends):
+            self._rends[self._idx].render(surf)
         if self._bw > 0:
             r, g, b, _ = self.region.rect.border_clr
             pygame.draw.rect(surf, (r, g, b), self.srect, self._bw)
@@ -3266,6 +3556,24 @@ def run(vsn_path: Optional[str], cfg: Config):
     if cfg.cms_enabled and cfg.cms_server and cfg.cms_username:
         cms = CMSClient(cfg, dl_dir, vsn_q)
         print(f'[Cloud+] Connecting to {cfg.cms_server} as {cfg.cms_username}')
+
+    # If the CMS is offline (or hasn't finished its first sync yet), fall back
+    # to whatever VSN is already on disk from the last successful sync.  Without
+    # this the sign shows a black screen after any restart during a CMS outage.
+    # We queue with vsn_was_fetched=False so a later CMS sync can still replace
+    # it once network is restored.
+    if not vsn_path:
+        try:
+            cached = sorted(dl_dir.glob('*.vsn'),
+                            key=lambda p: p.stat().st_mtime, reverse=True)
+        except OSError:
+            cached = []
+        if cached:
+            try:
+                vsn_q.put_nowait((str(cached[0]), False))
+                print(f'[Cloud+] Startup fallback: queued cached {cached[0].name}')
+            except _queue.Full:
+                pass
 
     clock    = pygame.time.Clock()
     settings: Optional[SettingsOverlay] = None

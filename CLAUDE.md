@@ -33,7 +33,7 @@ Developed from scratch as `player.py` in `/home/sacton/Documents/Projects/APK TE
 
 ---
 
-## Working Features (as of v1.0.24)
+## Working Features (as of v1.0.32)
 
 - **CMS sync** — downloads and plays assigned programs automatically; picks up schedule changes within 30 s
 - **WebSocket online presence** — device shows as Online in CMS panel
@@ -60,6 +60,11 @@ Developed from scratch as `player.py` in `/home/sacton/Documents/Projects/APK TE
 - **updater.bat self-overwrite fix** — replaced `xcopy /EXCLUDE:file.txt` with `robocopy /XF updater.bat` (reliable filename exclusion, no intermediate file); background swap of `updater.bat.new` moved to after `pause` so CMD has exited before the file is replaced.
 - **updater.bat process-exit poll** — replaced fixed `timeout /t 3` with a `tasklist` poll loop; also kills the launcher `cmd.exe` by window title so `run_player.bat` is not held open during the Samsung launcher rewrite. `/IS /IT` flags added to robocopy so files copy even when timestamps match. Samsung launcher echo blocks escape `(` and `)` as `^(` / `^)` to prevent CMD block-parser misrouting the `>` redirect.
 - **Black background = transparent** — `_fill_bg` and `_font_render` both treat `back_clr=(0,0,0,...)` as transparent, matching the CMS convention where `BackColor=0xFF000000` means "no background / clear."
+- **VSN item-level schedules** — `<Schedule>` blocks on items inside regions marked `<IsScheduleRegion>1</IsScheduleRegion>` are honoured. Fields: `IsLimitTime` + `StartTime`/`EndTime` (midnight-wrap), `IsLimitDate` + `StartDay`/`EndDay` + `StartDayTime`/`EndDayTime` boundary times, `IsLimitWeek` + `LimitWeek` Monday-first mask. Filter re-evaluates on cycle wrap and every 30 s. Regions without the flag play unchanged (backward compat).
+- **Clock 12-hour + selective flags** — `ClockRenderer._digital()` decodes the full `DigtalClock.Flags` bit map (year/month/day/hour/min/sec/DoW/AM-PM/24h/2-digit-year). Legacy `flags=0` VSN files still show `%H:%M:%S` for backward compat. Fixes "always military time" and "seconds still on" reports.
+- **Startup fallback playback** — when the CMS is offline (Cloud+ maintenance, cell outage, DNS failure) and no CLI VSN was passed, the player auto-queues the most-recently-modified `downloads/*.vsn` so the sign never goes black on restart during an outage. A later successful sync overrides the fallback.
+- **Bandwidth-safe CMS sync** — WS-triggered sync runs on a background thread and shares a non-blocking `_sync_lock` with the periodic sync, so WS ping/pong is never held up by an HTTP poll and syncs cannot race. The blanket `<progname>.files/` wipe on every VSN dirty-flag change is removed; per-media disk-size + URL check refetches only what actually changed. `_dl()` writes to a `.part` file and `os.replace()`s the target atomically, closing the WinError-32 unlink race during video playback. Each program's HTTP handle retries 3× before falling back; the log clearly announces when a stale program is being served because the newest failed. `[Cloud+] needs_dl <name>: url_changed=… cms_size=… disk_size=…` fires on every re-download decision so field techs can distinguish real content changes from glitches.
+- **Bucket-program warning** — `mime_type=bucket` programs in the CMS response are logged once per program ID (`[Cloud+] Bucket program "<name>" ignored — …`) and skipped, since the barrel/bucket schedule schema is not in Colorlight Cloud SDK V1.2. Prevents blank-sign debug sessions when a customer accidentally creates one.
 
 ---
 
@@ -97,6 +102,13 @@ These are non-obvious invariants that have caused bugs before — check these fi
 - **`updater.bat` — robocopy timestamp skipping**: `Expand-Archive` preserves ZIP timestamps, so reinstalling the same build produces identical source/dest timestamps and robocopy skips all files. `/IS /IT` flags force copy regardless.
 - **`updater.bat` — Samsung echo `(` / `)` must be escaped**: Bare `(` and `)` inside a `( ... ) > file` redirect block are counted by the CMD block parser, causing the redirect to be misapplied. Use `^(` and `^)` in all `echo` lines inside that block.
 - **Layer convention**: VSN Layer=1 is FOREGROUND (text, weather, clock), Layer=2 is BACKGROUND (video). Regions must be sorted `reverse=True` (descending layer number) so background renders first. This is the opposite of the intuitive reading.
+- **VSN Schedule Monday-first mask**: Colorlight Cloud SDK V1.2 explicitly documents `LimitWeek` as "List From Monday to Sunday" across every schedule variant (`commandSchedule.limit_weekday`, `contentsSchedule.limit_weekday`, Java SDK `weeks`, raw `/api/lanschedule` JSON). Player uses Python `datetime.weekday()` (Mon=0..Sun=6) directly — no offset. A Sunday-first interpretation would silently skew schedules by one day.
+- **`DigtalClock.Flags` bit map**: 1=Year, 2=Month, 4=Day, 8=Hour, 16=Minute, 32=Second, 512=DoW, 1024=AM/PM, 2048=24-hour, 4096=2-digit-year, 8192=multi-line-hint. `flags=0` means "display fixed text" per spec — treat as legacy VSN, fall back to `%H:%M:%S`. Bit 2048 SET = 24-hour; UNSET = 12-hour (AM/PM label controlled independently by bit 1024).
+- **`schedule_active(sched, now)` semantics**: a schedule is active when all three limit flags (date, time-of-day, weekday) individually permit playback. A missing (`None`) schedule is always active. A `<Schedule>` block with all `IsLimit*=0` is also always active. Time-of-day wraps midnight when `StartTime > EndTime`. Boundary-day times (`StartDayTime`/`EndDayTime`) apply only on the exact start/end date.
+- **`_dl()` atomic swap**: always writes to `<dest>.part` then `os.replace(tmp, dest)`. Do NOT re-introduce `dest.unlink()` before the write — on Windows the running video decoder holds the file open and a mid-playback unlink raises WinError 32 into the render loop.
+- **`_sync_lock` non-blocking acquire**: both the WS-sync worker and the periodic download loop use `acquire(blocking=False)`. If the lock is held, the requester logs and returns immediately. Do NOT switch either to a blocking acquire — a blocking WS-sync would freeze WS ping/pong for the duration of the HTTP sync, which was the exact bug this fixes.
+- **No blanket `.files/` wipe**: `_handle_program()` no longer calls `shutil.rmtree(<progname>.files/)` on VSN change. Per-media disk-size + URL comparison is the sole decision point for refetching. Do NOT re-add the wipe — it burned ~300 MB of cell data per trivial CMS edit on a five-video playlist.
+- **Bucket programs (`mime_type=bucket`)**: schema not in Colorlight Cloud SDK V1.2. Player logs a one-shot warning per program ID and skips. Customers who need scheduled-playlist rotation can achieve the same result with regular programs + CMS-level scheduling — no code change required.
 
 ---
 
@@ -199,6 +211,11 @@ Cloud+ Desktop Edition/
 | updater.bat: process-exit poll, launcher kill, `/IS /IT`, `^(`/`^)` escaping | Done (v1.0.23) |
 | PNG/GIF/image transparency — `.convert_alpha()` on all PIL `fromstring` paths | Done (v1.0.23) |
 | Black `BackColor` = transparent — `_fill_bg` / `_font_render` CMS convention | Done (v1.0.24) |
+| Bandwidth-safe CMS sync (WS bg sync + non-blocking lock, no blanket wipe, atomic `_dl`, retry + fallback log, `needs_dl` diagnostic) | Done (v1.0.32) — code, ⏳ field verification |
+| VSN item-level schedule (`<Schedule>` in schedule regions; Monday-first mask) | Done (v1.0.32) — verified via unit tests + VSN parse |
+| ClockRenderer 12-h / seconds / AM-PM / DoW / date flag decoding | Done (v1.0.32) — verified via unit tests |
+| Offline startup fallback (auto-queue newest cached VSN) | Done (v1.0.32) — verified end-to-end headless |
+| Bucket / barrel program schema | Deferred — no doc, one-shot warning log only |
 | Screenshot visible in CMS panel | Tabled |
 | Playlist history in CMS panel | Tabled |
 | Bulk deployment (env-var mode) | Planned |

@@ -2,6 +2,56 @@
 
 ---
 
+## v1.0.32 — 2026-07-09
+
+### Bandwidth / CMS sync fixes
+
+- **WS-triggered sync now runs on a background thread with a shared lock** — `_ws_sync()` used to call `self._sync()` synchronously on the WebSocketApp callback thread, blocking WS ping/pong for the duration of the HTTP poll + downloads. On flaky cellular links, a slow sync caused the sign to appear offline in the CMS panel for tens of seconds. Fixed by spawning a background worker and serializing periodic + WS-triggered syncs on `_sync_lock` with **non-blocking acquire** — the WS callback returns immediately, and a redundant WS trigger while a periodic sync is running is dropped instead of piling up.
+
+- **Removed blanket `.files/` wipe on every VSN dirty-flag change** — `_handle_program()` used to `shutil.rmtree(<progname>.files/)` and purge all per-media `_seen` keys any time the VSN's URL or size changed, forcing every video/image to be re-downloaded on the next pass. On a five-video playlist that was ~300 MB of cell data per trivial CMS edit. Wipe removed; the per-media loop below already refetches only what changed on disk.
+
+- **`_dl()` is now atomic** — downloads write to `<name>.part`, then `os.replace()` swaps the temp file into place. Previously `_dl()` called `dest.unlink()` then opened `dest` for writing, opening a race window where the target file was momentarily gone and video playback would raise `WinError 32` if it happened to read that frame.
+
+- **Retry + fallback logging in `_sync()`** — each program's HTTP handle is now retried up to 3× with backoff before being skipped. When the newest program fails after retries, the log prints `!! NEWEST program … FAILED after retries — falling back to an older program if available` and `!! Serving STALE program …`. Field techs can tell at a glance whether a stale playlist is a CMS or a network issue.
+
+- **`[Cloud+] needs_dl <name>: url_changed=… cms_size=… disk_size=… url=…` diagnostic log** — printed whenever the VSN is flagged for download. Distinguishes "real content change" from "session-first-detection re-queue" from "size/URL glitch."
+
+### VSN Schedule support (Colorlight Cloud SDK V1.2, spec 1.56.7+)
+
+- **`IsScheduleRegion` regions filter items at render time** — new `ItemSchedule` dataclass, `_schedule()` parser, and module-level `schedule_active(sched, now)` helper. `RegionState._advance()` skips items whose schedule is not currently active and re-evaluates on cycle wrap + every 30 s so items whose window opens mid-loop appear next round. Regions without `IsScheduleRegion=1` keep the old play-everything behaviour for backward compat.
+
+- **Fields honoured**: `IsLimitTime` + `StartTime`/`EndTime` (midnight-wrap when start > end), `IsLimitDate` + `StartDay`/`EndDay` + `StartDayTime`/`EndDayTime` boundary times, `IsLimitWeek` + `LimitWeek` mask.
+
+- **Weekday mask ordering** — Colorlight Cloud SDK V1.2 states "List From Monday to Sunday" verbatim across `commandSchedule.limit_weekday`, `contentsSchedule.limit_weekday`, Java SDK `weeks`, and raw `/api/lanschedule` JSON. Player uses Python `datetime.weekday()` directly (Mon=0 .. Sun=6) — no offset needed. A Sunday-first interpretation would silently skew schedules by one day.
+
+- **Bucket / barrel programs**: schema not documented in Colorlight Cloud SDK V1.2. When the CMS response's `mime_type` is `bucket`, the player logs `[Cloud+] Bucket program "<name>" ignored — bucket programs not yet supported. Use regular programs with CMS-level scheduling for rotating playlists.` **once per program ID** and skips the program. Prevents blank-sign debug sessions when a customer accidentally creates a bucket program.
+
+### Clock renderer fixes
+
+- **`DigtalClock.Flags` bits now honoured** — `ClockRenderer._digital()` previously hardcoded `%H:%M:%S` and only checked bit 8192 (mislabelled as date/day). Now decodes the full bit map per LANplayer SDK 1.25 spec (1=Year, 2=Month, 4=Day, 8=Hour, 16=Minute, 32=Second, 512=DoW, 1024=AM/PM, 2048=24-hour, 4096=2-digit-year, 8192=multi-line). If `flags==0` (legacy VSN with no clock config), falls back to `%H:%M:%S` for backward compat. Fixes the **"always military time"** and **"seconds still showing after being disabled"** bugs seen at customer sites.
+
+### Startup / offline resilience
+
+- **Auto-play cached VSN on startup when the CMS is offline** — after `CMSClient` is constructed, the player scans `downloads/*.vsn` and queues the most-recently-modified file with `vsn_was_fetched=False`. If the first CMS sync completes and returns a newer program, that overrides the fallback. If the CMS is unreachable (Cloud+ maintenance, cell outage, DNS failure), the sign keeps playing the last-known content instead of showing a black screen.
+
+### Verification status
+
+| Fix | Verified how | Status |
+|---|---|---|
+| Schedule filter (#9) | End-to-end parse + `schedule_active()` on a live VSN with a `<Schedule>` block | ✅ passed |
+| Clock flags (#8) | 6 unit tests: flags=0, 12h, 24h, seconds on/off, AM/PM | ✅ passed |
+| Startup fallback (#7) | Ran headless with CMS disabled + one cached VSN; log printed `[Cloud+] Startup fallback: queued cached …` and `[Cloud+] Now playing: …` | ✅ passed |
+| Atomic `_dl()` (#4) | Code review + module import | ✅ code path present |
+| WS bg sync + lock (#1) | Code review + module import | ⏳ needs live CMS |
+| No-wipe `.files/` (#2) | Code review + module import | ⏳ needs live CMS |
+| Retry + fallback log (#5) | Code review + module import | ⏳ needs live CMS |
+| Bucket warning | Code review + module import | ⏳ needs a bucket program in CMS |
+| `needs_dl` diagnostic (#3) | Code review + module import | ⏳ needs live CMS |
+
+Field verification (Task #6) is pending on real hardware — George's Pharmacy (CLCAPCI61Q2W) and Skyline Chili (CLCAPC5WJQXD) are the target devices.
+
+---
+
 ## v1.0.16 — 2026-06-03
 
 ### Fixes
