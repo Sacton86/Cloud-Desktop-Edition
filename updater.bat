@@ -73,7 +73,7 @@ echo  [1/4]  Downloading %LATEST%...
 if exist "%TMP_ZIP%" del /q "%TMP_ZIP%"
 
 powershell -NoProfile -Command ^
-    "try { $wc = New-Object System.Net.WebClient; $wc.DownloadFile('%DOWNLOAD_URL%', '%TMP_ZIP%'); exit 0 } catch { Write-Host ('  [ERROR] ' + $_); exit 1 }"
+    "try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $wc = New-Object System.Net.WebClient; $wc.DownloadFile('%DOWNLOAD_URL%', '%TMP_ZIP%'); exit 0 } catch { Write-Host ('  [ERROR] ' + $_); exit 1 }"
 
 if %errorlevel% neq 0 (
     echo.
