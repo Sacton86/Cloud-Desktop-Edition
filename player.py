@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-VERSION = "1.0.32"
+VERSION = "1.0.33"
 
 def _runtime_version() -> str:
     """Return the installed release tag from version.txt if present, else VERSION."""
@@ -3469,7 +3469,17 @@ def run(vsn_path: Optional[str], cfg: Config):
     _player_timezone = cfg.timezone
     _apply_locale(cfg.locale_code)
 
-    screen = _make_window(cfg)
+    # Retry display init — at logon the display driver may not be ready yet,
+    # especially on auto-logon devices that boot faster than the GPU driver.
+    for _disp_attempt in range(12):
+        try:
+            screen = _make_window(cfg)
+            break
+        except Exception as _disp_err:
+            if _disp_attempt >= 11:
+                raise
+            print(f'[Display] Init failed (attempt {_disp_attempt + 1}/12): {_disp_err} — retrying in 5s')
+            time.sleep(5)
 
     # Brightness dim surface (lazily sized to match screen)
     _dim_surf: Optional[pygame.Surface] = None

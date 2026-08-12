@@ -3,9 +3,13 @@ setlocal
 
 set "INSTALL_DIR=C:\ImpactLED\CloudPlayer"
 set "PLAYER_TASK=ImpactLED Cloud+ Desktop Player"
+set "GUARD_TASK=ImpactLED Process Guard"
 set "VERSION_FILE=%INSTALL_DIR%\version.txt"
 set "CONFIG_FILE=%INSTALL_DIR%\player_config.json"
 set "LAUNCHER=%INSTALL_DIR%\run_player.bat"
+
+:: Clean up any stale updating sentinel left by a previously interrupted run.
+del /q "%INSTALL_DIR%\_updating.flag" 2>nul
 set "GITHUB_API=https://api.github.com/repos/Sacton86/Cloud-Desktop-Edition/releases/latest"
 set "DOWNLOAD_URL=https://github.com/Sacton86/Cloud-Desktop-Edition/releases/latest/download/ImpactLED-Cloud-Player.zip"
 set "TMP_ZIP=%TEMP%\impactled-update.zip"
@@ -100,10 +104,13 @@ echo.
 
 :: ---- Stop player ----------------------------------------------------
 echo  [2/4]  Stopping player...
+:: Signal the process guard to stand down while the install is running.
+echo. > "%INSTALL_DIR%\_updating.flag"
 schtasks /end /tn "%PLAYER_TASK%" >nul 2>&1
 taskkill /f /im ImpactLED-Cloud-Player.exe >nul 2>&1
 :: Also kill the cmd.exe launcher loop -- it holds run_player.bat open for
-:: reading, which blocks the > redirect that rewrites it for Samsung devices.
+:: reading, which blocks the > redirect that rewrites it (both Samsung and
+:: standard Windows launchers are now always regenerated during updates).
 taskkill /f /fi "WINDOWTITLE eq ImpactLED Cloud+ Desktop Player" /im cmd.exe >nul 2>&1
 taskkill /f /fi "WINDOWTITLE eq ImpactLED Cloud+ Desktop Player  [Samsung PrismView]" /im cmd.exe >nul 2>&1
 
@@ -171,6 +178,9 @@ if /i "%DEVICE_TYPE%"=="samsung" (
         echo title ImpactLED Cloud+ Desktop Player  [Samsung PrismView]
         echo set "SM_EXE=C:\Program Files\Prismview\System Matrix\System Matrix.exe"
         echo.
+        echo :: Startup delay -- display driver may not be ready immediately at logon
+        echo timeout /t 20 /nobreak ^>nul
+        echo.
         echo :: Ensure System Matrix is running before the player starts
         echo :check_sm
         echo tasklist /fi "imagename eq System Matrix.exe" 2^>nul ^| find /i "System Matrix.exe" ^>nul
@@ -196,7 +206,28 @@ if /i "%DEVICE_TYPE%"=="samsung" (
         echo ^)
         echo goto loop
     ) > "%LAUNCHER%"
+) else (
+    :: Standard Windows -- always rewrite the launcher so the startup delay
+    :: is present even on devices that were installed before this fix.
+    :: Safe to write here: the cmd launcher was killed above for Samsung; for
+    :: standard devices the old cmd was also killed (taskkill step above).
+    (
+        echo @echo off
+        echo title ImpactLED Cloud+ Desktop Player
+        echo :: Startup delay -- display driver may not be ready immediately at logon
+        echo timeout /t 20 /nobreak ^>nul
+        echo :loop
+        echo cd /d "%INSTALL_DIR%"
+        echo "%INSTALL_DIR%\ImpactLED-Cloud-Player.exe"
+        echo echo.
+        echo echo   [ImpactLED Cloud+ Desktop Player exited -- restarting in 5 seconds...]
+        echo timeout /t 5 /nobreak ^>nul
+        echo goto loop
+    ) > "%LAUNCHER%"
 )
+
+:: Remove sentinel -- process guard may now restart the player if needed.
+del /q "%INSTALL_DIR%\_updating.flag" 2>nul
 
 echo.
 echo  ============================================================
@@ -215,6 +246,21 @@ if %errorlevel% neq 0 (
     ) else (
         start "" "%INSTALL_DIR%\ImpactLED-Cloud-Player.exe"
     )
+)
+
+:: schtasks /run returns 0 even when the task was accepted but didn't actually
+:: execute.  Wait 15 s and verify the player process appeared.  This is a
+:: diagnostic check only -- if the player didn't start, the tech is told to
+:: run the launcher manually (automated fallback from SYSTEM session is not
+:: reliable on modern Windows due to Session 0 isolation).
+timeout /t 15 /nobreak >nul
+tasklist /fi "imagename eq ImpactLED-Cloud-Player.exe" 2>nul | find /i "ImpactLED-Cloud-Player.exe" >nul
+if %errorlevel% neq 0 (
+    echo.
+    echo  [WARN]  Player process not detected 15s after restart attempt.
+    echo  [WARN]  If the sign stays blank, run manually:
+    echo  [WARN]    %LAUNCHER%
+    echo.
 )
 
 pause

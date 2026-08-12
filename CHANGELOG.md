@@ -2,6 +2,22 @@
 
 ---
 
+## v1.0.33 — 2026-08-11
+
+### Startup reliability fixes (blank sign after reboot / update)
+
+- **Display init retry in `run()`** — On auto-logon devices, Windows fires the Task Scheduler logon task before the GPU driver has fully initialized the display. `pygame.display.set_mode()` would raise `pygame.error`, the exe would exit immediately, and `run_player.bat`'s 5-second restart loop would spin in a tight crash cycle (visible as a CMD window with a blinking cursor, sign black). `run()` now retries `_make_window()` up to 12 times with 5-second pauses (60 s total) before giving up. Once the driver comes up the player starts cleanly without manual intervention.
+
+- **Startup delay added to launcher templates** — `full-install.bat` now writes `timeout /t 20 /nobreak >nul` before the main `:loop` in both the standard and Samsung `run_player.bat` templates. This gives the display driver a head start before the very first launch attempt, complementing the in-process retry above.
+
+- **`updater.bat` now rewrites the standard `run_player.bat` on every update** — Previously the launcher was only rewritten for Samsung PrismView devices. Standard Windows deployments installed before this release were missing the startup delay. `updater.bat` now always regenerates `run_player.bat` (with the startup delay) for both device types, so existing devices pick up the fix on their next automatic update.
+
+- **Process verification after update restart** — After calling `schtasks /run` to restart the player post-update, the updater now waits 15 s and checks whether `ImpactLED-Cloud-Player.exe` is actually running. If it is not, a `[WARN]` message is printed telling the tech to run the launcher manually. (`schtasks /run` returns errorlevel 0 even when the task submission is accepted but the process did not launch in the user session; the check catches this silent failure.)
+
+- **Process guard (`process_guard.bat` + Task Scheduler)** — New watchdog that covers the remaining gap: if the `run_player.bat` CMD window is killed mid-session (tech accidentally closes it, rogue process manager, etc.), the player exe has no supervisor and the sign goes black permanently until the next reboot. `process_guard.bat` is a one-shot script registered as an ONLOGON task that repeats every 5 minutes. It checks whether either the player exe or the launcher cmd is running; if both are absent it restarts the launcher. `updater.bat` writes `_updating.flag` before killing the player and removes it after install so the guard does not race with the installer. `process_guard.log` (in the install dir) records each intervention with a timestamp.
+
+---
+
 ## v1.0.32 — 2026-07-09
 
 ### Bandwidth / CMS sync fixes

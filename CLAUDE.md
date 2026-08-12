@@ -33,7 +33,7 @@ Developed from scratch as `player.py` in `/home/sacton/Documents/Projects/APK TE
 
 ---
 
-## Working Features (as of v1.0.32)
+## Working Features (as of v1.0.33)
 
 - **CMS sync** — downloads and plays assigned programs automatically; picks up schedule changes within 30 s
 - **WebSocket online presence** — device shows as Online in CMS panel
@@ -215,6 +215,11 @@ Cloud+ Desktop Edition/
 | VSN item-level schedule (`<Schedule>` in schedule regions; Monday-first mask) | Done (v1.0.32) — verified via unit tests + VSN parse |
 | ClockRenderer 12-h / seconds / AM-PM / DoW / date flag decoding | Done (v1.0.32) — verified via unit tests |
 | Offline startup fallback (auto-queue newest cached VSN) | Done (v1.0.32) — verified end-to-end headless |
+| Display init retry (60 s window for GPU driver to come up at logon) | Done (v1.0.33) |
+| Startup delay in launcher templates (20 s pre-loop) | Done (v1.0.33) — new installs and all updates via updater.bat |
+| updater.bat rewrite standard run_player.bat on every update | Done (v1.0.33) — existing deployments patched on next update |
+| Post-update process verification in updater.bat | Done (v1.0.33) — warns tech if restart didn't take |
+| Process guard (`process_guard.bat`, repeating ONLOGON task, `_updating.flag` sentinel) | Done (v1.0.33) |
 | Bucket / barrel program schema | Deferred — no doc, one-shot warning log only |
 | Screenshot visible in CMS panel | Tabled |
 | Playlist history in CMS panel | Tabled |

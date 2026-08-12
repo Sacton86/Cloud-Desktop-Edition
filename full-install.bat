@@ -329,6 +329,9 @@ if /i "%VSN_DEVICE_TYPE%"=="samsung" (
         echo title ImpactLED Cloud+ Desktop Player  [Samsung PrismView]
         echo set "SM_EXE=C:\Program Files\Prismview\System Matrix\System Matrix.exe"
         echo.
+        echo :: Startup delay -- display driver may not be ready immediately at logon
+        echo timeout /t 20 /nobreak ^>nul
+        echo.
         echo :: Ensure System Matrix is running before the player starts
         echo :check_sm
         echo tasklist /fi "imagename eq System Matrix.exe" 2^>nul ^| find /i "System Matrix.exe" ^>nul
@@ -359,6 +362,8 @@ if /i "%VSN_DEVICE_TYPE%"=="samsung" (
     (
         echo @echo off
         echo title ImpactLED Cloud+ Desktop Player
+        echo :: Startup delay -- display driver may not be ready immediately at logon
+        echo timeout /t 20 /nobreak ^>nul
         echo :loop
         echo cd /d "%INSTALL_DIR%"
         echo "%INSTALL_DIR%\ImpactLED-Cloud-Player.exe"
@@ -399,6 +404,24 @@ if %errorlevel% neq 0 (
     echo   [WARN]  Could not register updater task.
 ) else (
     echo   [OK]  Auto-updater registered -- checks for updates 5 min after each boot.
+)
+echo.
+
+:: Register process guard task (runs at logon, repeats every 5 min)
+:: Re-starts the player launcher if both the exe and the launcher cmd are gone.
+set "GUARD_TASK=ImpactLED Process Guard"
+schtasks /delete /tn "%GUARD_TASK%" /f >nul 2>&1
+schtasks /create /tn "%GUARD_TASK%" ^
+    /tr "cmd /c \"%INSTALL_DIR%\process_guard.bat\"" ^
+    /sc ONLOGON ^
+    /ru "%USERNAME%" ^
+    /ri 5 ^
+    /du 9999:59 ^
+    /f
+if %errorlevel% neq 0 (
+    echo   [WARN]  Could not register process guard task.
+) else (
+    echo   [OK]  Process guard registered -- checks every 5 min that the player is running.
 )
 echo.
 
