@@ -2,6 +2,57 @@
 
 ---
 
+## v1.0.34 — 2026-09-02
+
+### Crash fix: stale `page_idx` after a CMS hot-reload
+
+Field testing surfaced a reliable crash-loop: `IndexError: list index out of range` inside
+`run()`'s draw/page-advance section, a couple of playback cycles after startup, right after a
+second `[Cloud+] Now playing: …` log line.
+
+Root cause: `rebuild()` rebuilds `page_regions` for a newly hot-loaded playlist but never
+clamped the `page_idx` variable itself — only the `.activate()` call was modulo'd
+(`page_regions[page_idx % len(page_regions)]`), leaving `page_idx` itself unchanged. The CMS
+hot-reload path only resets `page_idx = 0` when `vsn_was_fetched or prog is None`; a sync that
+swaps in an already-fully-cached, differently-sized program (`vsn_was_fetched=False`, e.g. the
+first sync of a session finds the assigned program already correctly sized on disk from a prior
+run) skips that reset. If the new playlist has fewer pages than the old one, `page_idx` is left
+pointing past the end, and the very next frame's `pages[page_idx]` / `page_regions[page_idx]`
+read throws.
+
+Fixed by clamping `page_idx = min(page_idx, len(page_regions) - 1)` inside `rebuild()` itself —
+the single choke point all 7 call sites (file open, drag-drop, settings apply, F11, window
+resize, initial CLI load, CMS hot-reload) go through — rather than guarding every read site.
+
+### Single watchdog replaces run_player.bat + process_guard.bat
+
+`process_guard.bat` was registered as a Task Scheduler task by `full-install.bat` but was
+never actually copied to the install directory (not in the CI release zip, no install step
+wrote it) — the "ImpactLED Process Guard" task has likely been silently failing on every real
+install. Replaced both restart mechanisms with a single tray watchdog (`Watchdog\ImpactLED-Watchdog.exe`)
+that owns launching and restarting the player.
+
+- **`Watchdog\` added to the release zip** — `dev/watchdog/` (exe, `watchdog.ini`, installer
+  scripts) is now bundled alongside the player exe in the GitHub Actions release package.
+- **`full-install.bat`** no longer generates `run_player.bat` or registers the old
+  `"ImpactLED Cloud+ Desktop Player"` / `"ImpactLED Process Guard"` tasks. It patches
+  `Watchdog\watchdog.ini` (`PlayerPath`, `WatchSystemMatrix` for Samsung devices) and calls
+  `Install-Watchdog-Autostart.ps1`, which registers `"ImpactLED Player Watchdog Toolbar"`
+  (`AtLogOn`, `RestartCount 3` / `RestartInterval 1 min` on the task itself) and test-launches
+  it once.
+- **`updater.bat` field migration** — runs on every auto-update, idempotent: kills the watchdog
+  exe before replacing files (closing the race the old `_updating.flag`/`process_guard.bat`
+  check used to guard against — the watchdog doesn't know about that flag, so it's simplest to
+  just stop it outright during the file swap), deletes the legacy tasks/files if present, patches
+  `watchdog.ini`, and re-registers the watchdog task. Since the updater task runs as SYSTEM,
+  `Install-Watchdog-Autostart.ps1` gained a `-TargetUser` parameter (defaults to `$env:USERNAME`
+  for interactive use) — the updater detects the right kiosk user from the already-registered
+  watchdog task, falling back to the legacy player task, then the logged-in console user.
+  This is what actually reaches devices already deployed in the field, not just fresh installs.
+- **`process_guard.bat` deleted** — superseded.
+
+---
+
 ## v1.0.33 — 2026-08-11
 
 ### Startup reliability fixes (blank sign after reboot / update)

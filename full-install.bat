@@ -54,8 +54,9 @@ set "INSTALL_DIR=C:\ImpactLED\CloudPlayer"
 set "TMP_ZIP=%TEMP%\impactled-release.zip"
 set "TMP_EXTRACT=%TEMP%\impactled-release-extract"
 set "CONFIG_PATH=%INSTALL_DIR%\player_config.json"
-set "LAUNCHER=%INSTALL_DIR%\run_player.bat"
-set "TASK_NAME=ImpactLED Cloud+ Desktop Player"
+set "WATCHDOG_DIR=%INSTALL_DIR%\Watchdog"
+set "WATCHDOG_INI=%WATCHDOG_DIR%\watchdog.ini"
+set "WATCHDOG_TASK=ImpactLED Player Watchdog Toolbar"
 set "DOWNLOAD_URL=https://github.com/Sacton86/Cloud-Desktop-Edition/releases/latest/download/ImpactLED-Cloud-Player.zip"
 set "LAUNCHER_ONLY=0"
 
@@ -317,77 +318,37 @@ if "%LAUNCHER_ONLY%"=="1" (
     echo.
 )
 
-echo   [*]  [5/5]  Startup Task (Task Scheduler)
+echo   [*]  [5/5]  Watchdog + Task Scheduler
 echo   ----------------------------------------------------------------
 echo.
 
-:: Write launcher — Samsung gets System Matrix watchdog, standard gets simple restart loop
-if /i "%VSN_DEVICE_TYPE%"=="samsung" (
-    echo   .  Writing Samsung launcher with System Matrix watchdog...
-    (
-        echo @echo off
-        echo title ImpactLED Cloud+ Desktop Player  [Samsung PrismView]
-        echo set "SM_EXE=C:\Program Files\Prismview\System Matrix\System Matrix.exe"
-        echo.
-        echo :: Startup delay -- display driver may not be ready immediately at logon
-        echo timeout /t 20 /nobreak ^>nul
-        echo.
-        echo :: Ensure System Matrix is running before the player starts
-        echo :check_sm
-        echo tasklist /fi "imagename eq System Matrix.exe" 2^>nul ^| find /i "System Matrix.exe" ^>nul
-        echo if %%errorlevel%% neq 0 (
-        echo     echo   [System Matrix] Not running -- starting...
-        echo     start "" "%%SM_EXE%%"
-        echo     timeout /t 5 /nobreak ^>nul
-        echo )
-        echo.
-        echo :loop
-        echo cd /d "%INSTALL_DIR%"
-        echo "%INSTALL_DIR%\ImpactLED-Cloud-Player.exe"
-        echo echo.
-        echo echo   [ImpactLED Cloud+ Desktop Player exited -- restarting in 5 seconds...]
-        echo timeout /t 5 /nobreak ^>nul
-        echo.
-        echo :: Re-check System Matrix on every restart
-        echo tasklist /fi "imagename eq System Matrix.exe" 2^>nul ^| find /i "System Matrix.exe" ^>nul
-        echo if %%errorlevel%% neq 0 (
-        echo     echo   [System Matrix] Crashed -- restarting System Matrix...
-        echo     start "" "%%SM_EXE%%"
-        echo     timeout /t 5 /nobreak ^>nul
-        echo )
-        echo goto loop
-    ) > "%LAUNCHER%"
-) else (
-    echo   .  Writing standard launcher...
-    (
-        echo @echo off
-        echo title ImpactLED Cloud+ Desktop Player
-        echo :: Startup delay -- display driver may not be ready immediately at logon
-        echo timeout /t 20 /nobreak ^>nul
-        echo :loop
-        echo cd /d "%INSTALL_DIR%"
-        echo "%INSTALL_DIR%\ImpactLED-Cloud-Player.exe"
-        echo echo.
-        echo echo   [ImpactLED Cloud+ Desktop Player exited -- restarting in 5 seconds...]
-        echo timeout /t 5 /nobreak ^>nul
-        echo goto loop
-    ) > "%LAUNCHER%"
+:: The watchdog toolbar (Watchdog\ImpactLED-Watchdog.exe, shipped in the
+:: release zip) owns launching and restarting the player -- it polls every
+:: few seconds, detects both a dead and a hung process, and (for Samsung
+:: devices) also babysits System Matrix. No separate launcher .bat or
+:: process-guard task is needed any more.
+if not exist "%WATCHDOG_DIR%\ImpactLED-Watchdog.exe" (
+    echo   [ERROR]  Watchdog\ImpactLED-Watchdog.exe not found in %WATCHDOG_DIR%.
+    echo           The release package may be corrupt or out of date. Please try again.
+    pause
+    exit /b 1
 )
-echo   [OK]  Launcher written  -^>  %LAUNCHER%
 
-:: Register with Task Scheduler
-schtasks /delete /tn "%TASK_NAME%" /f >nul 2>&1
-schtasks /create /tn "%TASK_NAME%" ^
-    /tr "cmd /c \"%LAUNCHER%\"" ^
-    /sc ONLOGON ^
-    /ru "%USERNAME%" ^
-    /f
+echo   .  Configuring watchdog...
+set "WD_SM=False"
+if /i "%VSN_DEVICE_TYPE%"=="samsung" set "WD_SM=True"
+powershell -NoProfile -Command "$ini = Get-Content -LiteralPath '%WATCHDOG_INI%' -Raw; $ini = $ini -replace '(?m)^PlayerPath=.*$', 'PlayerPath=%INSTALL_DIR%\ImpactLED-Cloud-Player.exe'; $ini = $ini -replace '(?m)^WatchSystemMatrix=.*$', 'WatchSystemMatrix=%WD_SM%'; [System.IO.File]::WriteAllText('%WATCHDOG_INI%', $ini)"
+echo   [OK]  watchdog.ini  -^>  PlayerPath=%INSTALL_DIR%\ImpactLED-Cloud-Player.exe, WatchSystemMatrix=%WD_SM%
+echo.
 
+echo   .  Registering watchdog startup task...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%WATCHDOG_DIR%\Install-Watchdog-Autostart.ps1"
 if %errorlevel% neq 0 (
-    echo   [WARN]  Could not register startup task.
-    echo          Run the player manually:  %LAUNCHER%
+    echo   [WARN]  Could not register the watchdog task automatically.
+    echo          Run manually:  %WATCHDOG_DIR%\Install-Watchdog-Autostart.bat
 ) else (
-    echo   [OK]  Startup task registered -- player will launch at every logon.
+    echo   [OK]  Watchdog registered -- launches at every logon and starts the player.
+    echo          ^(the installer above also test-launches it once^)
 )
 echo.
 
@@ -405,35 +366,6 @@ if %errorlevel% neq 0 (
 ) else (
     echo   [OK]  Auto-updater registered -- checks for updates 5 min after each boot.
 )
-echo.
-
-:: Register process guard task (runs at logon, repeats every 5 min)
-:: Re-starts the player launcher if both the exe and the launcher cmd are gone.
-set "GUARD_TASK=ImpactLED Process Guard"
-schtasks /delete /tn "%GUARD_TASK%" /f >nul 2>&1
-schtasks /create /tn "%GUARD_TASK%" ^
-    /tr "cmd /c \"%INSTALL_DIR%\process_guard.bat\"" ^
-    /sc ONLOGON ^
-    /ru "%USERNAME%" ^
-    /ri 5 ^
-    /du 9999:59 ^
-    /f
-if %errorlevel% neq 0 (
-    echo   [WARN]  Could not register process guard task.
-) else (
-    echo   [OK]  Process guard registered -- checks every 5 min that the player is running.
-)
-echo.
-
-:: ================================================================
-::  Launch player now
-:: ================================================================
-echo   ==============================================================
-echo     Launching player...
-echo   ==============================================================
-echo.
-start "ImpactLED Cloud+ Desktop Player" cmd /c "%LAUNCHER%"
-echo   [OK]  Player started in a new window.
 echo.
 
 :: ================================================================
@@ -457,10 +389,10 @@ echo     Install dir    :  %INSTALL_DIR%
 echo     Config file    :  %CONFIG_PATH%
 echo.
 echo     Useful commands:
-echo       schtasks /query /tn "ImpactLED Cloud+ Desktop Player"      -- check status
-echo       schtasks /run   /tn "ImpactLED Cloud+ Desktop Player"      -- start now
-echo       schtasks /end   /tn "ImpactLED Cloud+ Desktop Player"      -- stop
-echo       schtasks /delete /tn "ImpactLED Cloud+ Desktop Player" /f  -- remove autostart
+echo       schtasks /query /tn "%WATCHDOG_TASK%"      -- check status
+echo       schtasks /run   /tn "%WATCHDOG_TASK%"      -- start now
+echo       schtasks /end   /tn "%WATCHDOG_TASK%"      -- stop
+echo       schtasks /delete /tn "%WATCHDOG_TASK%" /f  -- remove autostart
 echo.
 echo   ==============================================================
 echo               Impact LED Signs  .  impactledsigns.com

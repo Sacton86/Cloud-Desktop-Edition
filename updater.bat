@@ -2,11 +2,18 @@
 setlocal
 
 set "INSTALL_DIR=C:\ImpactLED\CloudPlayer"
-set "PLAYER_TASK=ImpactLED Cloud+ Desktop Player"
-set "GUARD_TASK=ImpactLED Process Guard"
+set "WATCHDOG_TASK=ImpactLED Player Watchdog Toolbar"
+set "WATCHDOG_DIR=%INSTALL_DIR%\Watchdog"
+set "WATCHDOG_INI=%WATCHDOG_DIR%\watchdog.ini"
 set "VERSION_FILE=%INSTALL_DIR%\version.txt"
 set "CONFIG_FILE=%INSTALL_DIR%\player_config.json"
-set "LAUNCHER=%INSTALL_DIR%\run_player.bat"
+
+:: Legacy names from the pre-watchdog two-task setup -- only used by the
+:: one-time field migration below to detect and retire them.
+set "LEGACY_PLAYER_TASK=ImpactLED Cloud+ Desktop Player"
+set "LEGACY_GUARD_TASK=ImpactLED Process Guard"
+set "LEGACY_LAUNCHER=%INSTALL_DIR%\run_player.bat"
+set "LEGACY_GUARD_BAT=%INSTALL_DIR%\process_guard.bat"
 
 :: Clean up any stale updating sentinel left by a previously interrupted run.
 del /q "%INSTALL_DIR%\_updating.flag" 2>nul
@@ -104,13 +111,19 @@ echo.
 
 :: ---- Stop player ----------------------------------------------------
 echo  [2/4]  Stopping player...
-:: Signal the process guard to stand down while the install is running.
+:: Signal that an install is running. The watchdog is killed outright below
+:: (simplest way to guarantee it can't race the file replacement or try to
+:: relaunch the player mid-update) -- this flag is now just a diagnostic
+:: marker, kept for backward compat with anything that still checks it.
 echo. > "%INSTALL_DIR%\_updating.flag"
-schtasks /end /tn "%PLAYER_TASK%" >nul 2>&1
+:: Stop the watchdog first so it doesn't relaunch the player out from under us.
+schtasks /end /tn "%WATCHDOG_TASK%" >nul 2>&1
+taskkill /f /im ImpactLED-Watchdog.exe >nul 2>&1
 taskkill /f /im ImpactLED-Cloud-Player.exe >nul 2>&1
-:: Also kill the cmd.exe launcher loop -- it holds run_player.bat open for
-:: reading, which blocks the > redirect that rewrites it (both Samsung and
-:: standard Windows launchers are now always regenerated during updates).
+:: Also kill any leftover legacy cmd.exe launcher loop from a pre-watchdog
+:: install -- it holds run_player.bat open for reading, which would block
+:: the migration cleanup below from deleting it.
+schtasks /end /tn "%LEGACY_PLAYER_TASK%" >nul 2>&1
 taskkill /f /fi "WINDOWTITLE eq ImpactLED Cloud+ Desktop Player" /im cmd.exe >nul 2>&1
 taskkill /f /fi "WINDOWTITLE eq ImpactLED Cloud+ Desktop Player  [Samsung PrismView]" /im cmd.exe >nul 2>&1
 
@@ -162,7 +175,7 @@ rmdir /s /q "%TMP_EXTRACT%" 2>nul
 :: ---- Record new version ---------------------------------------------
 powershell -NoProfile -Command "[System.IO.File]::WriteAllText('%INSTALL_DIR%\version.txt', '%LATEST%')"
 
-:: ---- Rewrite launcher if device_type is samsung ---------------------
+:: ---- Determine device type (drives WatchSystemMatrix in watchdog.ini) ---
 set "DEVICE_TYPE=windows"
 if exist "%CONFIG_FILE%" (
     powershell -NoProfile -Command "try { $j = ConvertFrom-Json (Get-Content '%CONFIG_FILE%' -Raw); if ($j.device_type) { [System.IO.File]::WriteAllText('%TEMP%\__impactled_dt.txt', $j.device_type) } } catch {}"
@@ -172,61 +185,64 @@ if exist "%CONFIG_FILE%" (
     )
 )
 
-if /i "%DEVICE_TYPE%"=="samsung" (
-    (
-        echo @echo off
-        echo title ImpactLED Cloud+ Desktop Player  [Samsung PrismView]
-        echo set "SM_EXE=C:\Program Files\Prismview\System Matrix\System Matrix.exe"
-        echo.
-        echo :: Startup delay -- display driver may not be ready immediately at logon
-        echo timeout /t 20 /nobreak ^>nul
-        echo.
-        echo :: Ensure System Matrix is running before the player starts
-        echo :check_sm
-        echo tasklist /fi "imagename eq System Matrix.exe" 2^>nul ^| find /i "System Matrix.exe" ^>nul
-        echo if %%errorlevel%% neq 0 ^(
-        echo     echo   [System Matrix] Not running -- starting...
-        echo     start "" "%%SM_EXE%%"
-        echo     timeout /t 5 /nobreak ^>nul
-        echo ^)
-        echo.
-        echo :loop
-        echo cd /d "%INSTALL_DIR%"
-        echo "%INSTALL_DIR%\ImpactLED-Cloud-Player.exe"
-        echo echo.
-        echo echo   [ImpactLED Cloud+ Desktop Player exited -- restarting in 5 seconds...]
-        echo timeout /t 5 /nobreak ^>nul
-        echo.
-        echo :: Re-check System Matrix on every restart
-        echo tasklist /fi "imagename eq System Matrix.exe" 2^>nul ^| find /i "System Matrix.exe" ^>nul
-        echo if %%errorlevel%% neq 0 ^(
-        echo     echo   [System Matrix] Crashed -- restarting System Matrix...
-        echo     start "" "%%SM_EXE%%"
-        echo     timeout /t 5 /nobreak ^>nul
-        echo ^)
-        echo goto loop
-    ) > "%LAUNCHER%"
-) else (
-    :: Standard Windows -- always rewrite the launcher so the startup delay
-    :: is present even on devices that were installed before this fix.
-    :: Safe to write here: the cmd launcher was killed above for Samsung; for
-    :: standard devices the old cmd was also killed (taskkill step above).
-    (
-        echo @echo off
-        echo title ImpactLED Cloud+ Desktop Player
-        echo :: Startup delay -- display driver may not be ready immediately at logon
-        echo timeout /t 20 /nobreak ^>nul
-        echo :loop
-        echo cd /d "%INSTALL_DIR%"
-        echo "%INSTALL_DIR%\ImpactLED-Cloud-Player.exe"
-        echo echo.
-        echo echo   [ImpactLED Cloud+ Desktop Player exited -- restarting in 5 seconds...]
-        echo timeout /t 5 /nobreak ^>nul
-        echo goto loop
-    ) > "%LAUNCHER%"
-)
+:: ---- Watchdog migration -----------------------------------------------
+:: Runs on every update, idempotent. Brings devices still on the old
+:: run_player.bat + process_guard.bat setup onto the watchdog, and keeps an
+:: already-migrated device's watchdog.ini/task in sync with this device.
+:: Written with goto/labels rather than nested if-blocks on purpose: this
+:: script does not use setlocal EnableDelayedExpansion, so a variable set
+:: and then read with %...% inside the *same* parenthesized if-block would
+:: still see its pre-block value. Every set below is its own top-level
+:: statement so plain %VAR% expansion in a later statement is safe.
+if not exist "%WATCHDOG_DIR%\ImpactLED-Watchdog.exe" goto watchdog_missing
 
-:: Remove sentinel -- process guard may now restart the player if needed.
+echo  Migrating to watchdog toolbar...
+
+:: Figure out which user the AtLogOn trigger should target: prefer the
+:: already-registered watchdog task (steady state), then the legacy player
+:: task (first migration on this device), then whoever is currently logged
+:: into the console (last resort -- this script runs as SYSTEM, so
+:: $env:USERNAME here is not the kiosk user).
+powershell -NoProfile -Command ^
+    "$u = $null; try { $t = Get-ScheduledTask -TaskName '%WATCHDOG_TASK%' -ErrorAction Stop; $u = $t.Principal.UserId } catch {}; if (-not $u) { try { $t = Get-ScheduledTask -TaskName '%LEGACY_PLAYER_TASK%' -ErrorAction Stop; $u = $t.Principal.UserId } catch {} }; if (-not $u) { try { $cs = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop; if ($cs.UserName) { $u = $cs.UserName } } catch {} }; if ($u) { [System.IO.File]::WriteAllText('%TEMP%\__impactled_wduser.txt', $u) }"
+set "WD_USER="
+if exist "%TEMP%\__impactled_wduser.txt" set /p WD_USER=<"%TEMP%\__impactled_wduser.txt"
+if exist "%TEMP%\__impactled_wduser.txt" del /q "%TEMP%\__impactled_wduser.txt" 2>nul
+
+:: Retire the old two-task setup.
+schtasks /delete /tn "%LEGACY_PLAYER_TASK%" /f >nul 2>&1
+schtasks /delete /tn "%LEGACY_GUARD_TASK%" /f >nul 2>&1
+del /q "%LEGACY_LAUNCHER%" 2>nul
+del /q "%LEGACY_GUARD_BAT%" 2>nul
+del /q "%INSTALL_DIR%\process_guard.log" 2>nul
+
+:: Point watchdog.ini at this device's player exe and Samsung setting.
+set "WD_SM=False"
+if /i "%DEVICE_TYPE%"=="samsung" set "WD_SM=True"
+powershell -NoProfile -Command "$ini = Get-Content -LiteralPath '%WATCHDOG_INI%' -Raw; $ini = $ini -replace '(?m)^PlayerPath=.*$', 'PlayerPath=%INSTALL_DIR%\ImpactLED-Cloud-Player.exe'; $ini = $ini -replace '(?m)^WatchSystemMatrix=.*$', 'WatchSystemMatrix=%WD_SM%'; [System.IO.File]::WriteAllText('%WATCHDOG_INI%', $ini)"
+
+if not defined WD_USER goto watchdog_user_unknown
+powershell -NoProfile -ExecutionPolicy Bypass -File "%WATCHDOG_DIR%\Install-Watchdog-Autostart.ps1" -TargetUser "%WD_USER%"
+echo  [OK]  Watchdog registered for user "%WD_USER%".
+goto watchdog_migration_done
+
+:watchdog_user_unknown
+echo  [WARN]  Could not determine which user to register the watchdog logon
+echo  [WARN]  task for -- no console user found and no prior task to read.
+echo  [WARN]  watchdog.ini was updated; the task itself was not touched.
+echo  [WARN]  Run Watchdog\Install-Watchdog-Autostart.bat once as the kiosk
+echo  [WARN]  user to finish setup.
+goto watchdog_migration_done
+
+:watchdog_missing
+echo  [WARN]  Watchdog\ImpactLED-Watchdog.exe not found -- this release package
+echo  [WARN]  is missing the watchdog. Skipping migration; player will still be
+echo  [WARN]  restarted below via whatever autostart task already exists.
+
+:watchdog_migration_done
+
+:: Remove sentinel now that the watchdog (or the legacy launcher, if the
+:: watchdog wasn't found above) is clear to restart the player.
 del /q "%INSTALL_DIR%\_updating.flag" 2>nul
 
 echo.
@@ -236,13 +252,16 @@ echo  ============================================================
 echo.
 
 :restart_player
-echo  Restarting player...
+echo  Restarting player via watchdog...
 echo.
-schtasks /run /tn "%PLAYER_TASK%" >nul 2>&1
+schtasks /run /tn "%WATCHDOG_TASK%" >nul 2>&1
 if %errorlevel% neq 0 (
-    :: Scheduled task not found or failed -- launch directly via the launcher
-    if exist "%LAUNCHER%" (
-        start "" "%LAUNCHER%"
+    :: Scheduled task not found or failed -- launch the exe directly.
+    :: (Only works if this branch happens to run in an interactive session;
+    :: from the SYSTEM-context updater task, Session 0 isolation means the
+    :: 15s check below is the real signal, same caveat as before.)
+    if exist "%WATCHDOG_DIR%\ImpactLED-Watchdog.exe" (
+        start "" "%WATCHDOG_DIR%\ImpactLED-Watchdog.exe"
     ) else (
         start "" "%INSTALL_DIR%\ImpactLED-Cloud-Player.exe"
     )
@@ -251,7 +270,7 @@ if %errorlevel% neq 0 (
 :: schtasks /run returns 0 even when the task was accepted but didn't actually
 :: execute.  Wait 15 s and verify the player process appeared.  This is a
 :: diagnostic check only -- if the player didn't start, the tech is told to
-:: run the launcher manually (automated fallback from SYSTEM session is not
+:: run the watchdog manually (automated fallback from SYSTEM session is not
 :: reliable on modern Windows due to Session 0 isolation).
 timeout /t 15 /nobreak >nul
 tasklist /fi "imagename eq ImpactLED-Cloud-Player.exe" 2>nul | find /i "ImpactLED-Cloud-Player.exe" >nul
@@ -259,7 +278,7 @@ if %errorlevel% neq 0 (
     echo.
     echo  [WARN]  Player process not detected 15s after restart attempt.
     echo  [WARN]  If the sign stays blank, run manually:
-    echo  [WARN]    %LAUNCHER%
+    echo  [WARN]    %WATCHDOG_DIR%\Start-Watchdog.bat
     echo.
 )
 

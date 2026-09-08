@@ -16,3 +16,6 @@ __pycache__/
 .vscode/
 *.swp
 .DS_Store
+
+# Self-signed test cert (private key) — never commit, low-value test artifact only
+watchdog/signing/

@@ -64,6 +64,19 @@ jobs:
           # Updater script
           Copy-Item "updater.bat" "release\"
 
+          # Watchdog toolbar — tray app that launches/monitors the player.
+          # Only ship what a device needs (exe, config, installer scripts) --
+          # not src\ (source) or signing\ (gitignored, won't exist in a fresh checkout anyway).
+          New-Item -ItemType Directory -Force -Path "release\Watchdog" | Out-Null
+          Copy-Item "watchdog\ImpactLED-Watchdog.exe" "release\Watchdog\"
+          Copy-Item "watchdog\ImpactLED-Watchdog.ps1" "release\Watchdog\"
+          Copy-Item "watchdog\watchdog.ini" "release\Watchdog\"
+          Copy-Item "watchdog\Install-Watchdog-Autostart.ps1" "release\Watchdog\"
+          Copy-Item "watchdog\Install-Watchdog-Autostart.bat" "release\Watchdog\"
+          Copy-Item "watchdog\Start-Watchdog.bat" "release\Watchdog\"
+          Copy-Item "watchdog\Start-Watchdog-Visible.bat" "release\Watchdog\"
+          Copy-Item "watchdog\README.txt" "release\Watchdog\"
+
           # Version file so the updater can detect installed version
           [System.IO.File]::WriteAllText("release\version.txt", $tag)
 
@@ -93,5 +106,6 @@ jobs:
             ### What's included
             - `ImpactLED-Cloud-Player.exe` — fully self-contained, no Python required
             - `fonts\` — bundled sign fonts
+            - `Watchdog\` — tray watchdog that launches the player and restarts it on crash/hang
           files: ${{ env.ZIP_NAME }}
           generate_release_notes: false

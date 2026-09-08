@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-VERSION = "1.0.33"
+VERSION = "1.0.34"
 
 def _runtime_version() -> str:
     """Return the installed release tag from version.txt if present, else VERSION."""
@@ -3521,7 +3521,7 @@ def run(vsn_path: Optional[str], cfg: Config):
         return True
 
     def rebuild():
-        nonlocal sx, sy, ox, oy, page_regions
+        nonlocal sx, sy, ox, oy, page_regions, page_idx
         if prog is None:
             return
         for slot in page_regions:
@@ -3530,7 +3530,13 @@ def run(vsn_path: Optional[str], cfg: Config):
         sx, sy, ox, oy = compute_layout(prog.width, prog.height, sw, sh, cfg.fit_mode)
         page_regions = build_page_regions(pages, sx, sy, ox, oy, vsn_dir, vsn_stem)
         if page_regions:
-            page_regions[page_idx % len(page_regions)].activate()
+            # A hot-reloaded playlist can be shorter than the one page_idx was
+            # tracking (e.g. CMS sync swaps in an already-cached, differently
+            # sized program without the vsn_was_fetched reset) -- clamp here,
+            # the single choke point every reload path goes through, instead
+            # of guarding every pages[page_idx]/page_regions[page_idx] read.
+            page_idx = min(page_idx, len(page_regions) - 1)
+            page_regions[page_idx].activate()
 
     def _open_file():
         """Open file picker and load chosen VSN (called from main thread only)."""
