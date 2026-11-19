@@ -17,5 +17,9 @@ __pycache__/
 *.swp
 .DS_Store
 
+# Local Tech Edition installer build output (CI builds into installer-out/)
+installer-out/
+tech-edition/Output/
+
 # Self-signed test cert (private key) — never commit, low-value test artifact only
 watchdog/signing/

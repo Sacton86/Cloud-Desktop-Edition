@@ -69,6 +69,23 @@ Developed from scratch as `player.py` in `/home/sacton/Documents/Projects/APK TE
 
 ---
 
+## Tech Edition (separate installer, same player)
+
+A single-file Windows installer (`ImpactLED-CloudPlus-Tech-Setup-<ver>.exe`, Inno Setup) so techs can install the player on their **own PCs** to test. It ships the **same `ImpactLED-Cloud-Player.exe`** built from the same `player.py` / `player.spec` — only the packaging differs. No `player.py` changes were needed.
+
+| | Tech Edition | Production (`full-install.bat`) |
+|---|---|---|
+| Install dir | `%LOCALAPPDATA%\Programs\ImpactLED Cloud+ Tech Edition` (per-user, no admin) | `C:\ImpactLED\CloudPlayer` |
+| Autostart | **None** — no scheduled task, Run key, Startup shortcut or watchdog | Watchdog logon task |
+| Relaunch on close/crash | **None** — ESC/Q/window-close ends the process for good | Watchdog restarts it |
+| Auto-update | **None** — run a newer Setup over the top (keeps `player_config.json`) | `updater.bat` SYSTEM task |
+| Launch | Start menu / optional desktop shortcut, always with `-w` (windowed) | Watchdog |
+| Release | Tag `tech-v*`, published as a **prerelease** | Tag `v*`, normal release |
+
+Files: `tech-edition/ImpactLED-CloudPlus-Tech.iss` (installer), `tech-edition/README-Tech.md` (tech-facing guide, also shipped in the install dir), `.github/workflows/build-tech.yml` (builds exe + installer, publishes the prerelease; `workflow_dispatch` = dry run, artifact only).
+
+---
+
 ## Known Issues / Tabled
 
 | Issue | Detail |
@@ -114,6 +131,10 @@ These are non-obvious invariants that have caused bugs before — check these fi
 - **`_sync_lock` non-blocking acquire**: both the WS-sync worker and the periodic download loop use `acquire(blocking=False)`. If the lock is held, the requester logs and returns immediately. Do NOT switch either to a blocking acquire — a blocking WS-sync would freeze WS ping/pong for the duration of the HTTP sync, which was the exact bug this fixes.
 - **No blanket `.files/` wipe**: `_handle_program()` no longer calls `shutil.rmtree(<progname>.files/)` on VSN change. Per-media disk-size + URL comparison is the sole decision point for refetching. Do NOT re-add the wipe — it burned ~300 MB of cell data per trivial CMS edit on a five-video playlist.
 - **Bucket programs (`mime_type=bucket`)**: schema not in Colorlight Cloud SDK V1.2. Player logs a one-shot warning per program ID and skips. Customers who need scheduled-playlist rotation can achieve the same result with regular programs + CMS-level scheduling — no code change required.
+- **Tech Edition releases must stay `prerelease: true` and `tech-v*`-tagged**: `full-install.bat` and `updater.bat` both download from `.../releases/latest/...` and `updater.bat` upgrades whenever the latest tag differs from `version.txt`. GitHub's `/releases/latest` skips prereleases, so a prerelease Tech build never reaches production signs; a normal release would auto-install onto every field device. `tech-v*` also does not match `build.yml`'s `v*` trigger (tag filters are anchored at the start). Never remove `prerelease: true` / `make_latest: false` from `build-tech.yml`.
+- **The install dir must be user-writable**: every runtime path (`player_config.json`, `downloads\`, screenshots, fonts, logo, `version.txt`) resolves beside the exe via `_BASE_DIR`, and `dl_dir.mkdir()` is unguarded. The Tech installer therefore installs per-user under `%LOCALAPPDATA%\Programs` (`PrivilegesRequired=lowest`). Installing under Program Files as a standard user would fail on first run.
+- **Tech Edition `-w` on every shortcut**: quitting runs `cfg.save()`, so a session that ended in fullscreen (F11) would otherwise reopen fullscreen. `main()` applies `-w` as `cfg.fullscreen = False` at startup. The Tech installer's config also writes `fullscreen=false`. Do not drop `-w` from the `.iss` shortcuts or `[Run]` entry.
+- **`auto-update` note**: `player.py` itself contains no GitHub self-update or relaunch code — updating is entirely `updater.bat` (SYSTEM scheduled task registered by `full-install.bat`). That is why the Tech Edition, which registers no tasks, never updates or restarts itself.
 
 ---
 
@@ -182,6 +203,8 @@ Cloud+ Desktop Edition/
 ├── requirements.txt            # Python deps (dev/source installs)
 ├── fonts/                      # Bundled sign fonts
 ├── watchdog/                   # Tray watchdog (launches/restarts the player) — see watchdog/README.txt
+├── tech-edition/               # Tech Edition installer (Inno Setup .iss + README-Tech.md) — no autostart
+├── .github/workflows/          # build.yml (production, v* tags) + build-tech.yml (Tech Edition, tech-v* tags)
 ├── downloads/                  # Cloud+-downloaded programs — git-ignored
 ├── releases/                   # Local release artifacts
 ├── install.sh                  # Linux/dev themed installer
@@ -228,4 +251,5 @@ Cloud+ Desktop Edition/
 | Bucket / barrel program schema | Deferred — no doc, one-shot warning log only |
 | Screenshot visible in CMS panel | Tabled |
 | Playlist history in CMS panel | Tabled |
+| Tech Edition single-file installer (Inno Setup, per-user, no autostart/relaunch/auto-update, `-w` shortcuts, optional credentials page, `tech-v*` prerelease) | Done — code, ⏳ first CI build + install/uninstall field verification (no local Python/Inno on dev PC) |
 | Bulk deployment (env-var mode) | Planned |

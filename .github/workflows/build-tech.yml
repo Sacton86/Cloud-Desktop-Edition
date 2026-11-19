@@ -1,0 +1,135 @@
+name: Build Tech Edition Installer
+
+# Builds the single-file Windows installer for techs (ImpactLED Cloud+ Tech Edition).
+#
+# Release a Tech build by pushing a tag with the tech- prefix:
+#   git tag tech-v1.0.34
+#   git push origin tech-v1.0.34
+#
+# IMPORTANT -- keep this separate from production releases:
+#   * The tag prefix is "tech-v*", which does NOT match build.yml's "v*" trigger
+#     (tag filters are anchored at the start of the tag name).
+#   * The release is published as a PRERELEASE and never marked "latest".
+#     Production full-install.bat and updater.bat both download from
+#     .../releases/latest/..., which GitHub resolves to the newest non-prerelease.
+#     A normal release here would push the Tech installer onto every field sign.
+#
+# You can also run this workflow manually (Actions > Build Tech Edition Installer >
+# Run workflow) for a dry run: it builds the installer and uploads it as a workflow
+# artifact, without creating a release.
+
+on:
+  push:
+    tags:
+      - 'tech-v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build, e.g. 1.0.34 or 1.0.34-rc1 (dry run: artifact only, no release)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        shell: powershell
+        env:
+          EVENT_NAME:    ${{ github.event_name }}
+          REF_NAME:      ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if ($env:EVENT_NAME -eq 'workflow_dispatch') { $raw = $env:INPUT_VERSION } else { $raw = $env:REF_NAME }
+          # tech-v1.0.34 -> 1.0.34 ; v1.0.34 -> 1.0.34
+          $ver = ($raw -replace '^tech-', '') -replace '^v', ''
+          if ($ver -notmatch '^\d+\.\d+\.\d+([.-][0-9A-Za-z.]+)?$') {
+              throw "Cannot derive a version from '$raw' (got '$ver'). Expected e.g. tech-v1.0.34."
+          }
+          "APP_VERSION=$ver" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Tech Edition version: $ver"
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      # Same exe as production: same player.py, same player.spec.
+      - name: Build executable
+        run: pyinstaller player.spec
+
+      - name: Install Inno Setup
+        shell: powershell
+        run: |
+          choco install innosetup -y --no-progress
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found at $iscc" }
+
+      - name: Build installer
+        shell: powershell
+        run: |
+          $iscc   = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          $outDir = Join-Path $env:GITHUB_WORKSPACE 'installer-out'
+          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+
+          & $iscc "/DAppVersion=$env:APP_VERSION" "/O$outDir" "tech-edition\ImpactLED-CloudPlus-Tech.iss"
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE" }
+
+          $setup = Join-Path $outDir "ImpactLED-CloudPlus-Tech-Setup-$env:APP_VERSION.exe"
+          if (-not (Test-Path $setup)) { throw "Expected installer not found: $setup" }
+          Write-Host ("Built {0} ({1:N1} MB)" -f $setup, ((Get-Item $setup).Length / 1MB))
+
+      # Manual runs: keep the installer as a downloadable workflow artifact only.
+      - name: Upload installer artifact (dry run)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ImpactLED-CloudPlus-Tech-Setup-${{ env.APP_VERSION }}
+          path: installer-out/ImpactLED-CloudPlus-Tech-Setup-${{ env.APP_VERSION }}.exe
+          retention-days: 14
+
+      # Tag pushes: publish as a PRERELEASE (never "latest" -- see header comment).
+      - name: Create GitHub prerelease
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "ImpactLED Cloud+ Tech Edition ${{ env.APP_VERSION }}"
+          prerelease: true
+          make_latest: false
+          body: |
+            ## ImpactLED Cloud+ Tech Edition ${{ env.APP_VERSION }}
+
+            For techs to install on their **own PC** to test and experiment. Same player as production.
+
+            ### Install
+            1. Download **ImpactLED-CloudPlus-Tech-Setup-${{ env.APP_VERSION }}.exe** below.
+            2. Double-click it. No administrator rights needed.
+               (Windows SmartScreen may say "Windows protected your PC" -- click **More info > Run anyway**.)
+            3. Optionally enter your **test** Terminal ID and Secret. Blank is fine; press **F12** in the player later.
+
+            ### What it does / doesn't do
+            - Installs to `%LOCALAPPDATA%\Programs\ImpactLED Cloud+ Tech Edition`, with a Start menu shortcut.
+            - **Does not start automatically** -- no logon task, watchdog or auto-updater.
+            - **Closing the player closes it for good.** Launch it again from the Start menu whenever you like.
+            - Always opens windowed; press **F11** for fullscreen, **ESC** or **Q** to quit.
+            - To update: run a newer Tech Edition installer over the top. Your settings are kept.
+            - To remove: Windows Settings > Apps > ImpactLED Cloud+ Tech Edition > Uninstall.
+
+            > This is a prerelease and is intentionally not the "latest" release, so it never reaches
+            > production signs.
+          # Relative, forward-slash path: release globbing is unreliable with backslash paths on Windows.
+          files: installer-out/ImpactLED-CloudPlus-Tech-Setup-${{ env.APP_VERSION }}.exe
+          generate_release_notes: false
